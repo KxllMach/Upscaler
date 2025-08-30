@@ -1,141 +1,121 @@
 import React, { useState } from "react";
+import { Upload, X } from "lucide-react";
 
-export default function UpscalerUI() {
-  const [files, setFiles] = useState([]);
+export default function App() {
+  const [images, setImages] = useState([]);
+
+  const handleFiles = (files) => {
+    const validFiles = Array.from(files).filter((file) =>
+      file.type.startsWith("image/")
+    );
+    const newImages = validFiles.map((file) => ({
+      file,
+      url: URL.createObjectURL(file),
+    }));
+    setImages((prev) => [...prev, ...newImages]);
+  };
 
   const handleDrop = (e) => {
     e.preventDefault();
-    const droppedFiles = Array.from(e.dataTransfer.files).filter((file) =>
-      file.type.startsWith("image/")
-    );
-    setFiles((prev) => [...prev, ...droppedFiles]);
+    handleFiles(e.dataTransfer.files);
   };
 
-  const handleFileSelect = (e) => {
-    const selectedFiles = Array.from(e.target.files).filter((file) =>
-      file.type.startsWith("image/")
-    );
-    setFiles((prev) => [...prev, ...selectedFiles]);
+  const handleBrowse = (e) => {
+    handleFiles(e.target.files);
   };
 
-  const handleDragOver = (e) => {
-    e.preventDefault();
+  const removeImage = (index) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <header className="text-center mb-8">
-        <h1 className="text-3xl font-bold">AI Image Upscaler</h1>
-      </header>
+    <div className="min-h-screen bg-gray-100 p-8 flex gap-9">
+      {/* Left side - Image Upload */}
+      <div
+        className="flex-1 flex flex-col border-2 border-dashed border-gray-400 rounded-xl bg-white items-center justify-center p-8 cursor-pointer hover:bg-gray-50 transition"
+        style={{ flexBasis: "60%" }}
+        onDrop={handleDrop}
+        onDragOver={(e) => e.preventDefault()}
+        onClick={() => document.getElementById("fileInput").click()}
+      >
+        <Upload className="w-12 h-12 text-gray-500 mb-4" />
+        <p className="text-gray-600">Drag & Drop Images here</p>
+        <p className="text-gray-400 text-sm">or click to browse</p>
+        <input
+          id="fileInput"
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={handleBrowse}
+          className="hidden"
+        />
+      </div>
 
-      <div className="flex max-w-7xl mx-auto gap-[36px]">
-        {/* Left Panel - Image Input */}
-        <div
-          className="flex-1 basis-[60%] border-2 border-dashed border-gray-400 bg-white rounded-xl flex flex-col justify-center items-center p-6 text-center cursor-pointer hover:border-blue-500"
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-        >
-          <p className="text-gray-500 mb-4">Drag & Drop Images Here</p>
-          <label className="px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700">
-            Browse
-            <input
-              type="file"
-              accept="image/png, image/jpeg, image/jpg, image/webp"
-              multiple
-              className="hidden"
-              onChange={handleFileSelect}
-            />
-          </label>
+      {/* Right side - Controls */}
+      <div className="flex-1 flex flex-col gap-6">
+        <h1 className="text-2xl font-bold">AI Image Upscaler</h1>
 
-          {/* Show uploaded files */}
-          {files.length > 0 && (
-            <div className="mt-6 w-full text-left">
-              <h2 className="font-semibold mb-2">Uploaded Files</h2>
-              <ul className="space-y-2">
-                {files.map((file, idx) => (
-                  <li
-                    key={idx}
-                    className="bg-gray-50 px-3 py-2 rounded-md shadow-sm border"
-                  >
-                    {file.name}
-                  </li>
-                ))}
-              </ul>
+        {/* Model Selector */}
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { title: "General", desc: "Best for photos" },
+            { title: "Anime", desc: "Best for anime/art" },
+            { title: "Lite", desc: "Fastest, low VRAM" },
+          ].map((m, i) => (
+            <div
+              key={i}
+              className="p-4 border rounded-xl bg-white shadow hover:shadow-md cursor-pointer"
+            >
+              <h2 className="font-semibold">{m.title}</h2>
+              <p className="text-sm text-gray-500">{m.desc}</p>
             </div>
-          )}
+          ))}
         </div>
 
-        {/* Right Panel - Controls */}
-        <div className="flex-1 basis-[40%] bg-white rounded-xl shadow p-6">
-          <h2 className="font-semibold text-lg mb-4">Settings</h2>
-
-          {/* Model Selector */}
-          <div className="grid grid-cols-3 gap-3 mb-6">
-            <div className="p-4 border rounded-xl text-center cursor-pointer hover:bg-blue-50">
-              <h3 className="font-semibold">General</h3>
-              <p className="text-xs text-gray-500">Best for photos</p>
-            </div>
-            <div className="p-4 border rounded-xl text-center cursor-pointer hover:bg-blue-50">
-              <h3 className="font-semibold">Anime</h3>
-              <p className="text-xs text-gray-500">Best for anime/art</p>
-            </div>
-            <div className="p-4 border rounded-xl text-center cursor-pointer hover:bg-blue-50">
-              <h3 className="font-semibold">Lite</h3>
-              <p className="text-xs text-gray-500">Fastest, low VRAM</p>
-            </div>
-          </div>
-
-          {/* Scale Options */}
-          <div className="mb-4">
-            <label className="block mb-1 font-medium">Scale</label>
-            <select className="w-full border rounded-lg px-3 py-2">
+        {/* Settings Panel */}
+        <div className="p-4 border rounded-xl bg-white shadow space-y-4">
+          <div>
+            <label className="block text-sm font-medium">Scale</label>
+            <select className="mt-1 w-full border rounded-md p-2">
               <option>2x</option>
               <option>4x</option>
             </select>
           </div>
-
-          {/* Format Options */}
-          <div className="mb-4">
-            <label className="block mb-1 font-medium">Format</label>
-            <select className="w-full border rounded-lg px-3 py-2">
+          <div>
+            <label className="block text-sm font-medium">Format</label>
+            <select className="mt-1 w-full border rounded-md p-2">
               <option>PNG</option>
-              <option>JPEG</option>
               <option>WebP</option>
+              <option>JPEG</option>
             </select>
           </div>
-
-          {/* Advanced Settings */}
-          <details className="mb-6">
-            <summary className="cursor-pointer font-medium">Advanced</summary>
-            <div className="mt-2 space-y-3">
-              <div>
-                <label className="block mb-1 text-sm">Tile Size</label>
-                <input
-                  type="number"
-                  defaultValue={256}
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block mb-1 text-sm">Overlap</label>
-                <input
-                  type="number"
-                  defaultValue={16}
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
-            </div>
-          </details>
-
-          {/* Progress Section */}
-          <div>
-            <h2 className="font-semibold text-lg mb-2">Progress</h2>
-            <div className="w-full bg-gray-200 rounded-full h-3 mb-3">
-              <div className="bg-blue-500 h-3 rounded-full w-[45%]"></div>
-            </div>
-            <p className="text-sm text-gray-500">Batch progress: 45%</p>
-          </div>
         </div>
+      </div>
+
+      {/* Uploaded Images List */}
+      <div className="absolute bottom-8 left-8 right-8 bg-white rounded-xl p-4 shadow space-y-3 max-h-48 overflow-y-auto">
+        {images.map((img, index) => (
+          <div
+            key={index}
+            className="flex items-center justify-between border rounded-lg p-2"
+          >
+            <div className="flex items-center gap-3">
+              <img
+                src={img.url}
+                alt={img.file.name}
+                className="w-18 h-18 object-cover rounded-md border"
+                style={{ width: "72px", height: "72px" }}
+              />
+              <span className="text-gray-700">{img.file.name}</span>
+            </div>
+            <button
+              onClick={() => removeImage(index)}
+              className="text-red-500 hover:text-red-700"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
