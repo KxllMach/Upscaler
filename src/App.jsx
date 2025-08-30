@@ -108,4 +108,26 @@ export default function App() {
       </div>
 
       {/* Progress Section */}
-      <h2
+      <h2 className="text-lg font-semibold mt-8 mb-4">Progress</h2>
+      <div className="bg-white rounded-xl shadow-sm p-4">
+        {files.length === 0 && (
+          <p className="text-gray-400">No files uploaded yet</p>
+        )}
+        {files.map((file, i) => (
+          <div key={i} className="mb-4">
+            <div className="flex justify-between text-sm mb-1">
+              <span>{file.name}</span>
+              <span>{progress[file.name] || 0}%</span>
+            </div>
+            <div className="h-2 bg-gray-200 rounded">
+              <div
+                className="h-2 bg-blue-600 rounded"
+                style={{ width: `${progress[file.name] || 0}%` }}
+              ></div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
