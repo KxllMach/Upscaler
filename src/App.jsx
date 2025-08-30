@@ -1,132 +1,141 @@
-// src/App.jsx
-import { useState } from "react";
+import React, { useState } from "react";
 
-export default function App() {
+export default function UpscalerUI() {
   const [files, setFiles] = useState([]);
-  const [progress, setProgress] = useState({});
-  const [selectedModel, setSelectedModel] = useState("general");
 
   const handleDrop = (e) => {
     e.preventDefault();
-    const newFiles = Array.from(e.dataTransfer.files);
-    setFiles([...files, ...newFiles]);
+    const droppedFiles = Array.from(e.dataTransfer.files).filter((file) =>
+      file.type.startsWith("image/")
+    );
+    setFiles((prev) => [...prev, ...droppedFiles]);
   };
 
-  const handleBrowse = (e) => {
-    const newFiles = Array.from(e.target.files);
-    setFiles([...files, ...newFiles]);
+  const handleFileSelect = (e) => {
+    const selectedFiles = Array.from(e.target.files).filter((file) =>
+      file.type.startsWith("image/")
+    );
+    setFiles((prev) => [...prev, ...selectedFiles]);
   };
 
-  const models = [
-    { id: "general", title: "General", desc: "Best for photos" },
-    { id: "anime", title: "Anime", desc: "Best for anime/art" },
-    { id: "lite", title: "Lite", desc: "Fastest, lower VRAM" },
-  ];
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b pb-4 mb-6">
-        <div className="text-xl font-bold">[ Logo ]</div>
-        <h1 className="text-2xl font-semibold">AI Image Upscaler</h1>
-      </div>
+    <div className="min-h-screen bg-gray-100 p-8">
+      <header className="text-center mb-8">
+        <h1 className="text-3xl font-bold">AI Image Upscaler</h1>
+      </header>
 
-      {/* Upload Section */}
-      <div
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={handleDrop}
-        className="border-2 border-dashed border-gray-400 rounded-xl p-10 text-center bg-white shadow-sm"
-      >
-        <p className="mb-3 text-gray-500">Drag & Drop images here</p>
-        <label className="cursor-pointer bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
-          Browse
-          <input type="file" multiple hidden onChange={handleBrowse} />
-        </label>
-      </div>
+      <div className="flex max-w-7xl mx-auto gap-[36px]">
+        {/* Left Panel - Image Input */}
+        <div
+          className="flex-1 basis-[60%] border-2 border-dashed border-gray-400 bg-white rounded-xl flex flex-col justify-center items-center p-6 text-center cursor-pointer hover:border-blue-500"
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+        >
+          <p className="text-gray-500 mb-4">Drag & Drop Images Here</p>
+          <label className="px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700">
+            Browse
+            <input
+              type="file"
+              accept="image/png, image/jpeg, image/jpg, image/webp"
+              multiple
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+          </label>
 
-      {/* Model Selector */}
-      <h2 className="text-lg font-semibold mt-8 mb-4">Select Model</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {models.map((m) => (
-          <div
-            key={m.id}
-            className={`cursor-pointer border rounded-xl p-4 shadow-sm transition ${
-              selectedModel === m.id
-                ? "border-blue-600 bg-blue-50"
-                : "hover:bg-gray-100"
-            }`}
-            onClick={() => setSelectedModel(m.id)}
-          >
-            <h3 className="font-medium">{m.title}</h3>
-            <p className="text-sm text-gray-500">{m.desc}</p>
+          {/* Show uploaded files */}
+          {files.length > 0 && (
+            <div className="mt-6 w-full text-left">
+              <h2 className="font-semibold mb-2">Uploaded Files</h2>
+              <ul className="space-y-2">
+                {files.map((file, idx) => (
+                  <li
+                    key={idx}
+                    className="bg-gray-50 px-3 py-2 rounded-md shadow-sm border"
+                  >
+                    {file.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Right Panel - Controls */}
+        <div className="flex-1 basis-[40%] bg-white rounded-xl shadow p-6">
+          <h2 className="font-semibold text-lg mb-4">Settings</h2>
+
+          {/* Model Selector */}
+          <div className="grid grid-cols-3 gap-3 mb-6">
+            <div className="p-4 border rounded-xl text-center cursor-pointer hover:bg-blue-50">
+              <h3 className="font-semibold">General</h3>
+              <p className="text-xs text-gray-500">Best for photos</p>
+            </div>
+            <div className="p-4 border rounded-xl text-center cursor-pointer hover:bg-blue-50">
+              <h3 className="font-semibold">Anime</h3>
+              <p className="text-xs text-gray-500">Best for anime/art</p>
+            </div>
+            <div className="p-4 border rounded-xl text-center cursor-pointer hover:bg-blue-50">
+              <h3 className="font-semibold">Lite</h3>
+              <p className="text-xs text-gray-500">Fastest, low VRAM</p>
+            </div>
           </div>
-        ))}
-      </div>
 
-      {/* Settings */}
-      <h2 className="text-lg font-semibold mt-8 mb-4">Settings</h2>
-      <div className="grid grid-cols-2 gap-4 bg-white p-6 rounded-xl shadow-sm">
-        <div>
-          <label className="block mb-1 font-medium">Scale</label>
-          <select className="w-full border rounded-md p-2">
-            <option>2x</option>
-            <option>4x</option>
-          </select>
-        </div>
-        <div>
-          <label className="block mb-1 font-medium">Format</label>
-          <select className="w-full border rounded-md p-2">
-            <option>PNG</option>
-            <option>WebP</option>
-            <option>JPEG</option>
-          </select>
-        </div>
-        {/* Advanced */}
-        <div className="col-span-2 mt-4">
-          <details className="border rounded-md p-3">
+          {/* Scale Options */}
+          <div className="mb-4">
+            <label className="block mb-1 font-medium">Scale</label>
+            <select className="w-full border rounded-lg px-3 py-2">
+              <option>2x</option>
+              <option>4x</option>
+            </select>
+          </div>
+
+          {/* Format Options */}
+          <div className="mb-4">
+            <label className="block mb-1 font-medium">Format</label>
+            <select className="w-full border rounded-lg px-3 py-2">
+              <option>PNG</option>
+              <option>JPEG</option>
+              <option>WebP</option>
+            </select>
+          </div>
+
+          {/* Advanced Settings */}
+          <details className="mb-6">
             <summary className="cursor-pointer font-medium">Advanced</summary>
-            <div className="mt-2 grid grid-cols-2 gap-4">
+            <div className="mt-2 space-y-3">
               <div>
-                <label className="block mb-1">Tile Size</label>
+                <label className="block mb-1 text-sm">Tile Size</label>
                 <input
                   type="number"
-                  className="w-full border rounded-md p-2"
                   defaultValue={256}
+                  className="w-full border rounded-lg px-3 py-2"
                 />
               </div>
               <div>
-                <label className="block mb-1">Overlap</label>
+                <label className="block mb-1 text-sm">Overlap</label>
                 <input
                   type="number"
-                  className="w-full border rounded-md p-2"
                   defaultValue={16}
+                  className="w-full border rounded-lg px-3 py-2"
                 />
               </div>
             </div>
           </details>
-        </div>
-      </div>
 
-      {/* Progress Section */}
-      <h2 className="text-lg font-semibold mt-8 mb-4">Progress</h2>
-      <div className="bg-white rounded-xl shadow-sm p-4">
-        {files.length === 0 && (
-          <p className="text-gray-400">No files uploaded yet</p>
-        )}
-        {files.map((file, i) => (
-          <div key={i} className="mb-4">
-            <div className="flex justify-between text-sm mb-1">
-              <span>{file.name}</span>
-              <span>{progress[file.name] || 0}%</span>
+          {/* Progress Section */}
+          <div>
+            <h2 className="font-semibold text-lg mb-2">Progress</h2>
+            <div className="w-full bg-gray-200 rounded-full h-3 mb-3">
+              <div className="bg-blue-500 h-3 rounded-full w-[45%]"></div>
             </div>
-            <div className="h-2 bg-gray-200 rounded">
-              <div
-                className="h-2 bg-blue-600 rounded"
-                style={{ width: `${progress[file.name] || 0}%` }}
-              ></div>
-            </div>
+            <p className="text-sm text-gray-500">Batch progress: 45%</p>
           </div>
-        ))}
+        </div>
       </div>
     </div>
   );
