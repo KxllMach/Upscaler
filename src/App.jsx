@@ -1,6 +1,5 @@
+// src/App.jsx
 import { useState } from "react";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 
 export default function App() {
   const [files, setFiles] = useState([]);
@@ -47,12 +46,14 @@ export default function App() {
 
       {/* Model Selector */}
       <h2 className="text-lg font-semibold mt-8 mb-4">Select Model</h2>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {models.map((m) => (
           <div
             key={m.id}
             className={`cursor-pointer border rounded-xl p-4 shadow-sm transition ${
-              selectedModel === m.id ? "border-blue-600 bg-blue-50" : "hover:bg-gray-100"
+              selectedModel === m.id
+                ? "border-blue-600 bg-blue-50"
+                : "hover:bg-gray-100"
             }`}
             onClick={() => setSelectedModel(m.id)}
           >
@@ -107,24 +108,4 @@ export default function App() {
       </div>
 
       {/* Progress Section */}
-      <h2 className="text-lg font-semibold mt-8 mb-4">Progress</h2>
-      <div className="bg-white rounded-xl shadow-sm p-4">
-        {files.length === 0 && <p className="text-gray-400">No files uploaded yet</p>}
-        {files.map((file, i) => (
-          <div key={i} className="mb-4">
-            <div className="flex justify-between text-sm mb-1">
-              <span>{file.name}</span>
-              <span>{progress[file.name] || 0}%</span>
-            </div>
-            <div className="h-2 bg-gray-200 rounded">
-              <div
-                className="h-2 bg-blue-600 rounded"
-                style={{ width: `${progress[file.name] || 0}%` }}
-              ></div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+      <h2
