@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, X, Rocket } from 'lucide-react';
 
-// --- Placeholder Components (We will build these out next) ---
-
+// --- Header Component ---
 const Header = () => (
   <header className="flex justify-between items-center p-6 px-10 text-white">
     <h1 className="text-xl font-bold">SafeScale</h1>
@@ -17,6 +16,7 @@ const Header = () => (
   </header>
 );
 
+// --- Hero Component ---
 const Hero = () => (
     <div className="text-center my-16">
         <h1 className="text-5xl font-bold text-white leading-tight">
@@ -33,7 +33,7 @@ const Hero = () => (
     </div>
 );
 
-
+// --- Upload Area Component ---
 const UploadArea = ({ onFiles }) => {
     const handleDrop = (e) => {
         e.preventDefault();
@@ -67,7 +67,7 @@ const UploadArea = ({ onFiles }) => {
     );
 };
 
-
+// --- Image List Component ---
 const ImageList = ({ images, onRemove }) => (
     <div className="mt-6 space-y-3">
         {images.map((img, index) => (
@@ -87,33 +87,48 @@ const ImageList = ({ images, onRemove }) => (
     </div>
 );
 
-
-const OptionsPanel = () => {
+// --- AI Model Selector Component ---
+const ModelSelector = () => {
     const [selectedModel, setSelectedModel] = useState("ESRGAN");
+    const models = [
+        { id: "ESRGAN", name: "ESRGAN" },
+        { id: "ESRGAN Anime", name: "ESRGAN Anime" },
+        { id: "Lite", name: "Lite" }
+    ];
+    const description = "General purpose model for most images. Provides a good balance between detail and artifact reduction.";
 
     return (
-        <div className="bg-[#1a1a2e] p-6 rounded-xl border border-gray-700 flex flex-col gap-6">
-            <h3 className="text-white font-semibold">Upscale Options</h3>
-            {/* Model Selector */}
-            <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">AI Model</label>
-                <div className="grid grid-cols-3 gap-2 bg-[#12121c] p-1 rounded-lg">
-                    {["ESRGAN", "ESRGAN Anime", "Lite"].map(model => (
+        <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">AI Model</label>
+            <div className="bg-[#12121c] p-1 rounded-lg">
+                <div className="grid grid-cols-3 gap-1">
+                    {models.map((model) => (
                         <button
-                            key={model}
-                            onClick={() => setSelectedModel(model)}
-                            className={`px-3 py-2 text-sm rounded-md ${selectedModel === model ? 'bg-purple-600 text-white' : 'text-gray-300 hover:bg-gray-700'}`}
+                            key={model.id}
+                            onClick={() => setSelectedModel(model.id)}
+                            className={`w-full px-3 py-2 text-sm rounded-md transition-colors duration-200 ${
+                                selectedModel === model.id
+                                    ? 'bg-purple-600 text-white font-semibold'
+                                    : 'text-gray-300 hover:bg-gray-700'
+                            }`}
                         >
-                            {model}
+                            {model.name}
                         </button>
                     ))}
                 </div>
-                <p className="text-xs text-gray-400 mt-2">
-                    General purpose model for most images. Provides a good balance between detail and artifact reduction.
-                </p>
             </div>
+            <p className="text-xs text-gray-400 mt-2 px-1">{description}</p>
+        </div>
+    );
+};
 
-            {/* Output Format */}
+// --- Options Panel Component ---
+const OptionsPanel = () => {
+    return (
+        <div className="bg-[#1a1a2e] p-6 rounded-xl border border-gray-700 flex flex-col gap-6">
+            <h3 className="text-white font-semibold">Upscale Options</h3>
+            <ModelSelector />
+
             <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Output Format</label>
                 <select className="w-full bg-[#12121c] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500">
@@ -123,7 +138,6 @@ const OptionsPanel = () => {
                 </select>
             </div>
 
-            {/* CTA Button */}
             <button className="w-full bg-purple-600 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 hover:bg-purple-700">
                 <Rocket className="w-5 h-5" />
                 Upscale Images
@@ -132,9 +146,7 @@ const OptionsPanel = () => {
     );
 };
 
-
 // --- Main App Component ---
-
 export default function App() {
     const [images, setImages] = useState([]);
 
@@ -150,17 +162,15 @@ export default function App() {
     return (
         <div className="min-h-screen bg-[#12121c] font-sans">
             <Header />
-            <main className="container mx-auto px-10">
+            <main className="container mx-auto px-10 pb-10">
                 <Hero />
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
                     
-                    {/* Left Column */}
                     <div className="lg:col-span-3">
                         <UploadArea onFiles={handleFiles} />
-                        <ImageList images={images} onRemove={removeImage} />
+                        {images.length > 0 && <ImageList images={images} onRemove={removeImage} />}
                     </div>
 
-                    {/* Right Column */}
                     <div className="lg:col-span-2">
                         <OptionsPanel />
                     </div>
