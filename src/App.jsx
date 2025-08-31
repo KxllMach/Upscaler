@@ -88,26 +88,44 @@ const ImageList = ({ images, onRemove }) => (
 );
 
 // --- AI Model Selector Component ---
+
 const ModelSelector = () => {
-    const [selectedModel, setSelectedModel] = useState("ESRGAN");
+    // Array of model objects, each with its own name and description
     const models = [
-        { id: "ESRGAN", name: "ESRGAN" },
-        { id: "ESRGAN Anime", name: "ESRGAN Anime" },
-        { id: "Lite", name: "Lite" }
+        {
+            id: "ESRGAN",
+            name: "ESRGAN",
+            description: "General purpose model for most images. Provides a good balance between detail and artifact reduction."
+        },
+        {
+            id: "ESRGAN Anime",
+            name: "ESRGAN Anime",
+            description: "Good for upscaling low resolution anime images. Works great for images with too many lines."
+        },
+        {
+            id: "Lite",
+            name: "Lite",
+            description: "Best for fast image upscaling. Time and performance efficiency at the cost of quality."
+        }
     ];
-    const description = "General purpose model for most images. Provides a good balance between detail and artifact reduction.";
+
+    // State now holds the entire selected model object, defaulting to the first one
+    const [selectedModel, setSelectedModel] = useState(models[0]);
 
     return (
         <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">AI Model</label>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+                AI Model
+            </label>
+            
             <div className="bg-[#12121c] p-1 rounded-lg">
                 <div className="grid grid-cols-3 gap-1">
                     {models.map((model) => (
                         <button
                             key={model.id}
-                            onClick={() => setSelectedModel(model.id)}
+                            onClick={() => setSelectedModel(model)}
                             className={`w-full px-3 py-2 text-sm rounded-md transition-colors duration-200 ${
-                                selectedModel === model.id
+                                selectedModel.id === model.id
                                     ? 'bg-purple-600 text-white font-semibold'
                                     : 'text-gray-300 hover:bg-gray-700'
                             }`}
@@ -117,11 +135,16 @@ const ModelSelector = () => {
                     ))}
                 </div>
             </div>
-            <p className="text-xs text-gray-400 mt-2 px-1">{description}</p>
+
+            {/* The description is now dynamically pulled from the selected model state */}
+            <p className="text-xs text-gray-400 mt-2 px-1 h-10 flex items-center">
+                {selectedModel.description}
+            </p>
         </div>
     );
 };
 
+export default ModelSelector;
 // --- Options Panel Component ---
 const OptionsPanel = () => {
     return (
