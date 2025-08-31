@@ -1,182 +1,172 @@
-import React, { useState } from "react";
-import { Upload, X } from "lucide-react";
+import React, { useState } from 'react';
+import { Upload, X, Rocket } from 'lucide-react';
 
-export default function ImageEnhancer() {
-  const [images, setImages] = useState([]);
-  const [selectedModel, setSelectedModel] = useState("");
-  const [scale, setScale] = useState("2x");
-  const [format, setFormat] = useState("PNG");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+// --- Placeholder Components (We will build these out next) ---
 
-  const handleFiles = (files) => {
-    const imageFiles = Array.from(files).filter((file) =>
-      file.type.startsWith("image/")
-    );
-    setImages((prev) => [...prev, ...imageFiles]);
-  };
+const Header = () => (
+  <header className="flex justify-between items-center p-6 px-10 text-white">
+    <h1 className="text-xl font-bold">SafeScale</h1>
+    <nav className="flex items-center gap-6 text-sm text-gray-300">
+      <a href="#" className="hover:text-white">Features</a>
+      <a href="#" className="hover:text-white">How It Works</a>
+      <a href="#" className="hover:text-white">Buy Me a Coffee</a>
+    </nav>
+    <button className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-lg">
+      Get Started
+    </button>
+  </header>
+);
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    handleFiles(e.dataTransfer.files);
-  };
-
-  const handleBrowse = (e) => {
-    handleFiles(e.target.files);
-  };
-
-  const removeImage = (index) => {
-    setImages((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  return (
-    <div className="flex min-h-screen bg-gray-50 p-6 gap-9">
-      {/* LEFT SIDE: Upload + Image List */}
-      <div className="flex flex-col w-[60%]">
-        {/* Upload Section */}
-        <div
-          className="h-[60vh] border-2 border-dashed border-gray-400 rounded-lg flex flex-col items-center justify-center cursor-pointer bg-white"
-          onDrop={handleDrop}
-          onDragOver={(e) => e.preventDefault()}
-        >
-          <Upload className="w-10 h-10 text-gray-500 mb-2" />
-          <p className="text-gray-600">Drag & Drop images here</p>
-          <p className="text-gray-500 text-sm">or</p>
-          <label className="mt-2 bg-blue-500 text-white px-4 py-2 rounded cursor-pointer hover:bg-blue-600">
-            Browse
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleBrowse}
-              className="hidden"
-            />
-          </label>
-        </div>
-
-        {/* Uploaded Images List */}
-        <div className="mt-4 space-y-3 overflow-y-auto max-h-[30vh] pr-2">
-          {images.map((img, index) => (
-            <div
-              key={index}
-              className="flex items-center justify-between bg-white p-2 rounded shadow-sm border"
-            >
-              <div className="flex items-center gap-3">
-                <img
-                  src={URL.createObjectURL(img)}
-                  alt={img.name}
-                  className="w-16 h-16 object-cover rounded"
-                />
-                <span className="text-sm text-gray-700">{img.name}</span>
-              </div>
-              <button
-                onClick={() => removeImage(index)}
-                className="text-red-500 hover:text-red-700"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* RIGHT SIDE: Controls */}
-      <div className="w-[40%] flex flex-col gap-6 sticky top-6">
-        {/* Model Selector */}
-        <div>
-          <label className="block text-sm font-medium mb-2">Choose Model</label>
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { id: "general", name: "General", desc: "Best for photos" },
-              { id: "anime", name: "Anime", desc: "Best for anime/art" },
-              { id: "lite", name: "Lite", desc: "Fastest, low VRAM" },
-            ].map((model) => (
-              <button
-                key={model.id}
-                onClick={() => setSelectedModel(model.id)}
-                className={`p-3 rounded-lg border text-left ${
-                  selectedModel === model.id
-                    ? "bg-blue-500 text-white border-blue-600"
-                    : "bg-white hover:bg-gray-100 border-gray-300"
-                }`}
-              >
-                <p className="font-semibold">{model.name}</p>
-                <p className="text-xs text-gray-500">
-                  {model.desc}
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Scale Options */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Upscale</label>
-          <div className="flex gap-3">
-            {["2x", "4x"].map((s) => (
-              <button
-                key={s}
-                onClick={() => setScale(s)}
-                className={`px-4 py-2 rounded border ${
-                  scale === s
-                    ? "bg-blue-500 text-white"
-                    : "bg-white text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Format Options */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Output Format</label>
-          <select
-            className="w-full border rounded px-3 py-2"
-            value={format}
-            onChange={(e) => setFormat(e.target.value)}
-          >
-            <option value="PNG">PNG</option>
-            <option value="JPEG">JPEG</option>
-            <option value="WebP">WebP</option>
-          </select>
-        </div>
-
-        {/* Advanced Settings */}
-        <div>
-          <button
-            onClick={() => setAdvancedOpen((o) => !o)}
-            className="text-sm text-blue-600 hover:underline"
-          >
-            {advancedOpen ? "Hide Advanced ▲" : "Show Advanced ▼"}
-          </button>
-          {advancedOpen && (
-            <div className="mt-3 space-y-3">
-              <div>
-                <label className="block text-xs mb-1">Tile Size</label>
-                <input
-                  type="number"
-                  defaultValue={256}
-                  className="w-full border rounded px-2 py-1"
-                />
-              </div>
-              <div>
-                <label className="block text-xs mb-1">Overlap</label>
-                <input
-                  type="number"
-                  defaultValue={16}
-                  className="w-full border rounded px-2 py-1"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* CTA */}
-        <button className="bg-green-500 text-white py-3 rounded-lg hover:bg-green-600 shadow">
-          Enhance Images
-        </button>
-      </div>
+const Hero = () => (
+    <div className="text-center my-16">
+        <h1 className="text-5xl font-bold text-white leading-tight">
+            AI-Powered Private Image Upscaling
+        </h1>
+        <h2 className="text-5xl font-bold text-gray-300 leading-tight">
+            Natively on <span className="text-purple-400">YOUR</span> Device
+        </h2>
+        <p className="text-gray-400 mt-4">
+            Upscale your images on your device's hardware.
+            <br />
+            No spying, No cloud, No Stress
+        </p>
     </div>
-  );
+);
+
+
+const UploadArea = ({ onFiles }) => {
+    const handleDrop = (e) => {
+        e.preventDefault();
+        onFiles(e.dataTransfer.files);
+    };
+
+    const handleBrowse = (e) => {
+        onFiles(e.target.files);
+    };
+
+    return (
+        <div 
+            className="border-2 border-dashed border-gray-600 rounded-xl flex flex-col items-center justify-center p-16 bg-[#1a1a2e]"
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+        >
+            <Upload className="w-10 h-10 text-gray-400 mb-4" />
+            <p className="text-gray-300">Drag & Drop Images Here</p>
+            <p className="text-gray-500 text-sm my-2">or</p>
+            <label className="bg-purple-600 text-white px-5 py-2 rounded-lg cursor-pointer hover:bg-purple-700">
+                Browse
+                <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleBrowse}
+                    className="hidden"
+                />
+            </label>
+        </div>
+    );
+};
+
+
+const ImageList = ({ images, onRemove }) => (
+    <div className="mt-6 space-y-3">
+        {images.map((img, index) => (
+            <div key={index} className="flex items-center justify-between bg-[#1a1a2e] p-3 rounded-lg border border-gray-700">
+                <div className="flex items-center gap-4">
+                    <img src={URL.createObjectURL(img)} alt={img.name} className="w-12 h-12 object-cover rounded-md" />
+                    <div>
+                        <p className="text-sm font-medium text-white">{img.name}</p>
+                        <p className="text-xs text-gray-400">1920x1080 • 1.7MB</p> {/* Placeholder info */}
+                    </div>
+                </div>
+                <button onClick={() => onRemove(index)} className="text-gray-400 hover:text-white">
+                    <X className="w-5 h-5" />
+                </button>
+            </div>
+        ))}
+    </div>
+);
+
+
+const OptionsPanel = () => {
+    const [selectedModel, setSelectedModel] = useState("ESRGAN");
+
+    return (
+        <div className="bg-[#1a1a2e] p-6 rounded-xl border border-gray-700 flex flex-col gap-6">
+            <h3 className="text-white font-semibold">Upscale Options</h3>
+            {/* Model Selector */}
+            <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">AI Model</label>
+                <div className="grid grid-cols-3 gap-2 bg-[#12121c] p-1 rounded-lg">
+                    {["ESRGAN", "ESRGAN Anime", "Lite"].map(model => (
+                        <button
+                            key={model}
+                            onClick={() => setSelectedModel(model)}
+                            className={`px-3 py-2 text-sm rounded-md ${selectedModel === model ? 'bg-purple-600 text-white' : 'text-gray-300 hover:bg-gray-700'}`}
+                        >
+                            {model}
+                        </button>
+                    ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-2">
+                    General purpose model for most images. Provides a good balance between detail and artifact reduction.
+                </p>
+            </div>
+
+            {/* Output Format */}
+            <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Output Format</label>
+                <select className="w-full bg-[#12121c] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500">
+                    <option>PNG</option>
+                    <option>JPEG</option>
+                    <option>WebP</option>
+                </select>
+            </div>
+
+            {/* CTA Button */}
+            <button className="w-full bg-purple-600 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 hover:bg-purple-700">
+                <Rocket className="w-5 h-5" />
+                Upscale Images
+            </button>
+        </div>
+    );
+};
+
+
+// --- Main App Component ---
+
+export default function App() {
+    const [images, setImages] = useState([]);
+
+    const handleFiles = (files) => {
+        const imageFiles = Array.from(files).filter(file => file.type.startsWith("image/"));
+        setImages(prev => [...prev, ...imageFiles]);
+    };
+
+    const removeImage = (index) => {
+        setImages(prev => prev.filter((_, i) => i !== index));
+    };
+
+    return (
+        <div className="min-h-screen bg-[#12121c] font-sans">
+            <Header />
+            <main className="container mx-auto px-10">
+                <Hero />
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+                    
+                    {/* Left Column */}
+                    <div className="lg:col-span-3">
+                        <UploadArea onFiles={handleFiles} />
+                        <ImageList images={images} onRemove={removeImage} />
+                    </div>
+
+                    {/* Right Column */}
+                    <div className="lg:col-span-2">
+                        <OptionsPanel />
+                    </div>
+
+                </div>
+            </main>
+        </div>
+    );
 }
