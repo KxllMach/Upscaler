@@ -1,71 +1,124 @@
-import { useState } from "react"
-import { Trash2 } from "lucide-react"
+import React, { useState } from "react";
+import { Upload, X } from "lucide-react";
 
-export default function App() {
-  const [images, setImages] = useState([])
+export default function ImageEnhancer() {
+  const [images, setImages] = useState([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [scale, setScale] = useState("2x");
 
-  const handleImageUpload = (e) => {
-    const files = Array.from(e.target.files)
-    const filePreviews = files.map((file) => ({
-      id: Date.now() + Math.random(),
-      name: file.name,
-      url: URL.createObjectURL(file),
-    }))
-    setImages((prev) => [...prev, ...filePreviews])
-  }
+  const handleFiles = (files) => {
+    const imageFiles = Array.from(files).filter((file) =>
+      file.type.startsWith("image/")
+    );
+    setImages((prev) => [...prev, ...imageFiles]);
+  };
 
-  const removeImage = (id) => {
-    setImages((prev) => prev.filter((img) => img.id !== id))
-  }
+  const handleDrop = (e) => {
+    e.preventDefault();
+    handleFiles(e.dataTransfer.files);
+  };
+
+  const handleBrowse = (e) => {
+    handleFiles(e.target.files);
+  };
+
+  const removeImage = (index) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  };
 
   return (
-    <div className="flex h-screen">
-      {/* LEFT SIDE - image input + thumbnails */}
-      <div className="w-3/5 p-4 overflow-y-auto border-r border-gray-200">
-        <h2 className="text-lg font-semibold mb-2">Upload Images</h2>
-        <input
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={handleImageUpload}
-          className="mb-4 block w-full border rounded-lg p-2"
-        />
+    <div className="flex min-h-screen bg-gray-50 p-6 gap-9">
+      {/* LEFT SIDE: Upload + Image List */}
+      <div className="flex flex-col w-[60%]">
+        {/* Upload Section */}
+        <div
+          className="flex-0 h-[60vh] border-2 border-dashed border-gray-400 rounded-lg flex flex-col items-center justify-center cursor-pointer bg-white"
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
+        >
+          <Upload className="w-10 h-10 text-gray-500 mb-2" />
+          <p className="text-gray-600">Drag & Drop images here</p>
+          <p className="text-gray-500 text-sm">or</p>
+          <label className="mt-2 bg-blue-500 text-white px-4 py-2 rounded cursor-pointer hover:bg-blue-600">
+            Browse
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleBrowse}
+              className="hidden"
+            />
+          </label>
+        </div>
 
-        {/* Uploaded images list */}
-        <div className="space-y-3">
-          {images.map((img) => (
+        {/* Uploaded Images List */}
+        <div className="mt-4 space-y-3 overflow-y-auto max-h-[30vh] pr-2">
+          {images.map((img, index) => (
             <div
-              key={img.id}
-              className="flex items-center gap-3 border p-2 rounded-lg shadow-sm"
+              key={index}
+              className="flex items-center justify-between bg-white p-2 rounded shadow-sm border"
             >
-              <img
-                src={img.url}
-                alt={img.name}
-                className="w-18 h-18 object-cover rounded-md border"
-                style={{ width: "72px", height: "72px" }}
-              />
-              <div className="flex-1">
-                <p className="text-sm truncate">{img.name}</p>
+              <div className="flex items-center gap-3">
+                <img
+                  src={URL.createObjectURL(img)}
+                  alt={img.name}
+                  className="w-16 h-16 object-cover rounded"
+                />
+                <span className="text-sm text-gray-700">{img.name}</span>
               </div>
               <button
-                onClick={() => removeImage(img.id)}
+                onClick={() => removeImage(index)}
                 className="text-red-500 hover:text-red-700"
               >
-                <Trash2 size={18} />
+                <X className="w-5 h-5" />
               </button>
             </div>
           ))}
         </div>
       </div>
 
-      {/* RIGHT SIDE - control panel */}
-      <div className="w-2/5 p-4 bg-gray-50 sticky top-0 h-screen">
-        <h2 className="text-lg font-semibold mb-4">Controls</h2>
-        <button className="bg-blue-500 text-white px-4 py-2 rounded-md">
-          Select Model
+      {/* RIGHT SIDE: Controls */}
+      <div className="w-[40%] flex flex-col gap-6 sticky top-6">
+        {/* Model Selection */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Choose Model</label>
+          <select
+            className="w-full border rounded px-3 py-2"
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+          >
+            <option value="">Select a model</option>
+            <option value="model1">Model 1</option>
+            <option value="model2">Model 2</option>
+            <option value="model3">Model 3</option>
+          </select>
+        </div>
+
+        {/* Scale Options */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Upscale</label>
+          <div className="flex gap-3">
+            {["2x", "3x", "4x"].map((s) => (
+              <button
+                key={s}
+                onClick={() => setScale(s)}
+                className={`px-4 py-2 rounded border ${
+                  scale === s
+                    ? "bg-blue-500 text-white"
+                    : "bg-white text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* CTA */}
+        <button className="bg-green-500 text-white py-3 rounded-lg hover:bg-green-600 shadow">
+          Enhance Images
         </button>
-        {/* Add more controls here */}
       </div>
     </div>
-  )
+  );
 }
