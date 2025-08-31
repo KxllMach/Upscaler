@@ -3,6 +3,7 @@ import { Upload, X } from "lucide-react";
 
 export default function App() {
   const [images, setImages] = useState([]);
+  const [isUpscaling, setIsUpscaling] = useState(false);
 
   const handleFiles = (files) => {
     const validFiles = Array.from(files).filter((file) =>
@@ -11,6 +12,7 @@ export default function App() {
     const newImages = validFiles.map((file) => ({
       file,
       url: URL.createObjectURL(file),
+      progress: 0, // placeholder
     }));
     setImages((prev) => [...prev, ...newImages]);
   };
@@ -26,6 +28,24 @@ export default function App() {
 
   const removeImage = (index) => {
     setImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const startUpscaling = () => {
+    if (images.length === 0) return;
+    setIsUpscaling(true);
+
+    // Simulate fake progress for now
+    const interval = setInterval(() => {
+      setImages((prev) =>
+        prev.map((img) =>
+          img.progress < 100
+            ? { ...img, progress: img.progress + 10 }
+            : img
+        )
+      );
+    }, 500);
+
+    setTimeout(() => clearInterval(interval), 6000);
   };
 
   return (
@@ -90,6 +110,15 @@ export default function App() {
             </select>
           </div>
         </div>
+
+        {/* CTA */}
+        <button
+          onClick={startUpscaling}
+          className="bg-blue-600 text-white py-2 px-4 rounded-lg shadow hover:bg-blue-700 transition disabled:bg-gray-400"
+          disabled={images.length === 0 || isUpscaling}
+        >
+          {isUpscaling ? "Upscaling..." : "Start Upscaling"}
+        </button>
       </div>
 
       {/* Uploaded Images List */}
@@ -103,17 +132,28 @@ export default function App() {
               <img
                 src={img.url}
                 alt={img.file.name}
-                className="w-18 h-18 object-cover rounded-md border"
+                className="object-cover rounded-md border"
                 style={{ width: "72px", height: "72px" }}
               />
               <span className="text-gray-700">{img.file.name}</span>
             </div>
-            <button
-              onClick={() => removeImage(index)}
-              className="text-red-500 hover:text-red-700"
-            >
-              <X className="w-6 h-6" />
-            </button>
+            <div className="flex items-center gap-3">
+              {isUpscaling && (
+                <div className="w-32 bg-gray-200 h-2 rounded">
+                  <div
+                    className="bg-blue-500 h-2 rounded"
+                    style={{ width: `${img.progress}%` }}
+                  />
+                </div>
+              )}
+              <button
+                onClick={() => removeImage(index)}
+                className="text-red-500 hover:text-red-700"
+                disabled={isUpscaling}
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
           </div>
         ))}
       </div>
