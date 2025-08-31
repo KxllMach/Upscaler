@@ -5,6 +5,8 @@ export default function ImageEnhancer() {
   const [images, setImages] = useState([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [scale, setScale] = useState("2x");
+  const [format, setFormat] = useState("PNG");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const handleFiles = (files) => {
     const imageFiles = Array.from(files).filter((file) =>
@@ -32,7 +34,7 @@ export default function ImageEnhancer() {
       <div className="flex flex-col w-[60%]">
         {/* Upload Section */}
         <div
-          className="flex-0 h-[60vh] border-2 border-dashed border-gray-400 rounded-lg flex flex-col items-center justify-center cursor-pointer bg-white"
+          className="h-[60vh] border-2 border-dashed border-gray-400 rounded-lg flex flex-col items-center justify-center cursor-pointer bg-white"
           onDrop={handleDrop}
           onDragOver={(e) => e.preventDefault()}
         >
@@ -79,26 +81,38 @@ export default function ImageEnhancer() {
 
       {/* RIGHT SIDE: Controls */}
       <div className="w-[40%] flex flex-col gap-6 sticky top-6">
-        {/* Model Selection */}
+        {/* Model Selector */}
         <div>
-          <label className="block text-sm font-medium mb-1">Choose Model</label>
-          <select
-            className="w-full border rounded px-3 py-2"
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-          >
-            <option value="">Select a model</option>
-            <option value="model1">Model 1</option>
-            <option value="model2">Model 2</option>
-            <option value="model3">Model 3</option>
-          </select>
+          <label className="block text-sm font-medium mb-2">Choose Model</label>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { id: "general", name: "General", desc: "Best for photos" },
+              { id: "anime", name: "Anime", desc: "Best for anime/art" },
+              { id: "lite", name: "Lite", desc: "Fastest, low VRAM" },
+            ].map((model) => (
+              <button
+                key={model.id}
+                onClick={() => setSelectedModel(model.id)}
+                className={`p-3 rounded-lg border text-left ${
+                  selectedModel === model.id
+                    ? "bg-blue-500 text-white border-blue-600"
+                    : "bg-white hover:bg-gray-100 border-gray-300"
+                }`}
+              >
+                <p className="font-semibold">{model.name}</p>
+                <p className="text-xs text-gray-500">
+                  {model.desc}
+                </p>
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Scale Options */}
         <div>
           <label className="block text-sm font-medium mb-1">Upscale</label>
           <div className="flex gap-3">
-            {["2x", "3x", "4x"].map((s) => (
+            {["2x", "4x"].map((s) => (
               <button
                 key={s}
                 onClick={() => setScale(s)}
@@ -112,6 +126,50 @@ export default function ImageEnhancer() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Format Options */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Output Format</label>
+          <select
+            className="w-full border rounded px-3 py-2"
+            value={format}
+            onChange={(e) => setFormat(e.target.value)}
+          >
+            <option value="PNG">PNG</option>
+            <option value="JPEG">JPEG</option>
+            <option value="WebP">WebP</option>
+          </select>
+        </div>
+
+        {/* Advanced Settings */}
+        <div>
+          <button
+            onClick={() => setAdvancedOpen((o) => !o)}
+            className="text-sm text-blue-600 hover:underline"
+          >
+            {advancedOpen ? "Hide Advanced ▲" : "Show Advanced ▼"}
+          </button>
+          {advancedOpen && (
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className="block text-xs mb-1">Tile Size</label>
+                <input
+                  type="number"
+                  defaultValue={256}
+                  className="w-full border rounded px-2 py-1"
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-1">Overlap</label>
+                <input
+                  type="number"
+                  defaultValue={16}
+                  className="w-full border rounded px-2 py-1"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* CTA */}
