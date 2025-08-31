@@ -116,6 +116,27 @@ export default function App() {
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // Effect hook to dynamically load fonts and set global styles
+  useEffect(() => {
+    // Create and append the Google Fonts stylesheet link to the document head
+    const fontLink = document.createElement('link');
+    fontLink.href = "https://fonts.googleapis.com/css2?family=General+Sans:ital,wght@0,400;0,700&family=Space+Grotesk:wght@400;500;700&display=swap";
+    fontLink.rel = 'stylesheet';
+    document.head.appendChild(fontLink);
+
+    // Create and append a style tag to set the body's default font-family
+    // This mimics the behavior of your global.css file
+    const styleTag = document.createElement('style');
+    styleTag.innerHTML = `body { font-family: 'Space Grotesk', sans-serif; }`;
+    document.head.appendChild(styleTag);
+    
+    // Cleanup function to remove the added tags when the component unmounts
+    return () => {
+      document.head.removeChild(fontLink);
+      document.head.removeChild(styleTag);
+    };
+  }, []); // The empty dependency array ensures this effect runs only once on mount
+
   const handleFilesAdded = (newFiles) => { setUploadedFiles((prev) => [...prev, ...newFiles]); };
   const handleRemoveFile = (index) => { setUploadedFiles((prev) => prev.filter((_, i) => i !== index)); };
 
@@ -131,7 +152,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#111827]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+    <div className="min-h-screen bg-[#111827]">
       <Navigation />
       <div className="w-full px-4 sm:px-8 md:px-16"><div className="h-px bg-[#374151]"></div></div>
       <HeroSection />
