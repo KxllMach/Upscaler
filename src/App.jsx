@@ -120,7 +120,7 @@ const UpscaleOptions = ({ onUpscale, disabled = false, modelLoadingState }) => {
                                 <div className="text-center">
                                     <div className="w-8 h-8 border-2 border-[#7B33F7] border-t-transparent rounded-full mx-auto mb-2 animate-spin"></div>
                                     <p className="text-[#9D9D9D] text-sm">
-                                        Loading model... {modelLoadingState.progress > 0 && modelLoadingState.progress < 100 ? `${modelLoadingState.progress.toFixed(0)}%` : ''}
+                                        Loading model...
                                     </p>
                                 </div>
                             ) : (
@@ -169,11 +169,12 @@ export default function App() {
                 if (type === 'loadModel') {
                     try {
                         const { modelUrl } = payload;
-                        if (!session) { 
+                        if (!session || session.modelUrl !== modelUrl) { 
                             const response = await fetch(modelUrl);
                             if (!response.ok) throw new Error(\`HTTP \${response.status}: \${response.statusText}\`);
                             const modelBuffer = await response.arrayBuffer();
                             session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
+                            session.modelUrl = modelUrl;
                         }
                         self.postMessage({ type: 'modelLoaded', workerId });
                     } catch (error) {
@@ -194,6 +195,7 @@ export default function App() {
 
                         for (let y = 0; y < stripHeight; y += TILE_SIZE) {
                             for (let x = 0; x < originalWidth; x += TILE_SIZE) {
+                                // Calculate overlapping tile dimensions
                                 const tileX = Math.max(0, x - TILE_OVERLAP);
                                 const tileY = Math.max(0, y - TILE_OVERLAP);
                                 const tileW = TILE_SIZE + (x > 0 ? TILE_OVERLAP : 0) + (x + TILE_SIZE < originalWidth ? TILE_OVERLAP : 0);
@@ -361,7 +363,7 @@ export default function App() {
                         }
                     };
                     worker.addEventListener('message', listener);
-                    worker.postMessage({ type: 'upscaleStrip', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight, originalWidth: originalBitmap.width, originalHeight: originalBitmap.height }, workerId });
+                    worker.postMessage({ type: 'upscaleStrip', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight, originalWidth: originalBitmap.width }, workerId });
                 })
             );
 
