@@ -141,7 +141,6 @@ export default function App() {
     // Effect to set up and tear down the web worker
     useEffect(() => {
         const workerCode = `
-            // This code runs in the background thread (Web Worker)
             let session;
             self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
 
@@ -150,11 +149,12 @@ export default function App() {
 
                 if (type === 'loadModel') {
                     try {
-                        const { modelId } = payload;
-                        const modelUrl = '/models/' + modelId;
+                        const { modelId, baseUrl } = payload;
+                        // Construct the full URL for the model inside the worker
+                        const modelUrl = new URL(\`/models/\${modelId}\`, baseUrl).href;
                         
                         const response = await fetch(modelUrl);
-                        if (!response.ok) throw new Error('Failed to fetch model.');
+                        if (!response.ok) throw new Error(\`Failed to fetch model. Status: \${response.statusText}\`);
                         
                         const contentLength = +response.headers.get('Content-Length');
                         const reader = response.body.getReader();
@@ -208,9 +208,8 @@ export default function App() {
                 setModelLoadingState({ isLoading: true, progress });
             } else if (type === 'modelLoaded') {
                 setModelLoadingState({ isLoading: false, progress: 100 });
-                // Now that model is loaded, we can proceed with upscaling
             } else if (type === 'upscaleComplete') {
-                // This message comes from the worker after it finishes one image
+                // This is now handled within the handleUpscale loop
             } else if (type === 'error') {
                 console.error("Worker Error:", message);
                 alert("An error occurred in the background worker: " + message);
@@ -268,7 +267,6 @@ export default function App() {
         setIsProcessing(true);
         setModelLoadingState({ isLoading: true, progress: 0 });
 
-        // A promise to resolve when the model is loaded
         const modelReadyPromise = new Promise((resolve, reject) => {
             const listener = (event) => {
                 if (event.data.type === 'modelLoaded') {
@@ -281,9 +279,16 @@ export default function App() {
             };
             workerRef.current.addEventListener('message', listener);
         });
-
-        workerRef.current.postMessage({ type: 'loadModel', payload: { modelId } });
-        await modelReadyPromise;
+        
+        // Pass the base URL to the worker
+        workerRef.current.postMessage({ type: 'loadModel', payload: { modelId, baseUrl: window.location.origin } });
+        
+        try {
+            await modelReadyPromise;
+        } catch(e) {
+            // Error is already alerted by the worker's onmessage handler
+            return; // Stop execution if model fails to load
+        }
         
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
@@ -311,8 +316,14 @@ export default function App() {
             });
             
             workerRef.current.postMessage({ type: 'upscale', payload: { imageData } });
-            const outputTensor = await upscalePromise;
-            tensorToImageAndDownload(outputTensor, file.name, format);
+            
+            try {
+                const outputTensor = await upscalePromise;
+                tensorToImageAndDownload(outputTensor, file.name, format);
+            } catch(e) {
+                // Error is already alerted, just stop this loop
+                break;
+            }
         }
 
         setIsProcessing(false);
@@ -346,4 +357,5 @@ export default function App() {
         </div>
     );
 }
+
 
