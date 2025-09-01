@@ -1,11 +1,26 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-//Trigger new dev logic
+
 // --- Helper Data & Components ---
-// Note: Model order has been updated to match your latest request.
+// Models are now mapped to their permanent Hugging Face URLs.
 const AI_MODELS = [
-  { id: 'real_esrgan_x4_fp16.onnx', name: 'ESRGAN', description: 'General purpose model for most images. Provides a good balance between detail and artifact reduction.' },
-  { id: 'RealESRGAN_x4plus_anime_4B32F.onnx', name: 'ESRGAN Anime', description: 'Specialized model for anime and cartoon images with enhanced detail preservation.' },
-  { id: 'realesrgan-x4.onnx', name: 'Lite', description: 'Lightweight model for quick processing with moderate quality improvements.' },
+  { 
+    id: 'real_esrgan_x4_fp16.onnx', 
+    name: 'ESRGAN', 
+    description: 'General purpose model for most images. Provides a good balance between detail and artifact reduction.',
+    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/real_esrgan_x4_fp16.onnx' 
+  },
+  { 
+    id: 'RealESRGAN_x4plus_anime_4B32F.onnx', 
+    name: 'ESRGAN Anime', 
+    description: 'Specialized model for anime and cartoon images with enhanced detail preservation.',
+    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/RealESRGAN_x4plus_anime_4B32F.onnx' 
+  },
+  { 
+    id: 'realesrgan-x4.onnx', 
+    name: 'Lite', 
+    description: 'Lightweight model for quick processing with moderate quality improvements.',
+    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/realesrgan-x4.onnx'
+  },
 ];
 const OUTPUT_FORMATS = ['PNG', 'JPEG', 'WEBP'];
 
@@ -87,7 +102,7 @@ const UpscaleOptions = ({ onUpscale, disabled = false, modelLoadingState }) => {
     const [selectedModel, setSelectedModel] = useState(AI_MODELS[0].id);
     const [selectedFormat, setSelectedFormat] = useState('PNG');
     const currentModelDetails = AI_MODELS.find(model => model.id === selectedModel);
-    const handleUpscaleClick = () => onUpscale({ model: selectedModel, format: selectedFormat });
+    const handleUpscaleClick = () => onUpscale({ model: AI_MODELS.find(m => m.id === selectedModel), format: selectedFormat });
 
     return (
         <div className="w-full max-w-lg bg-[#1F2937] rounded-[2.5rem] p-6 sm:p-9">
@@ -150,52 +165,49 @@ export default function App() {
                 const { type, payload } = event.data;
 
                 if (type === 'loadModel') {
-    try {
-        const { modelId } = payload;
-        const modelUrl = `/models/${modelId}`;
-        console.log("Fetching model from:", modelUrl);
+                    try {
+                        const { modelUrl } = payload;
+                        
+                        const response = await fetch(modelUrl);
+                        if (!response.ok) {
+                            throw new Error(\`HTTP \${response.status}: \${response.statusText} - Could not fetch model.\`);
+                        }
+                        
+                        const contentLength = response.headers.get('Content-Length');
+                        if (!contentLength) {
+                            const modelBuffer = await response.arrayBuffer();
+                            if (modelBuffer.byteLength === 0) throw new Error('Downloaded model file is empty.');
+                            session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
+                            self.postMessage({ type: 'modelLoaded' });
+                            return;
+                        }
 
-        const response = await fetch(modelUrl);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText} - Could not fetch model.`);
-        }
+                        const reader = response.body.getReader();
+                        let loaded = 0;
+                        const chunks = [];
+                        const total = parseInt(contentLength, 10);
+                        
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            chunks.push(value);
+                            loaded += value.length;
+                            self.postMessage({ type: 'modelLoadingProgress', progress: (loaded / total) * 100 });
+                        }
 
-        const contentLength = response.headers.get('Content-Length');
-        if (!contentLength) {
-            const modelBuffer = await response.arrayBuffer();
-            if (modelBuffer.byteLength === 0) throw new Error('Downloaded model file is empty.');
-            session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
-            self.postMessage({ type: 'modelLoaded' });
-            return;
-        }
-
-        const reader = response.body.getReader();
-        let loaded = 0;
-        const chunks = [];
-        const total = parseInt(contentLength, 10);
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value);
-            loaded += value.length;
-            self.postMessage({ type: 'modelLoadingProgress', progress: (loaded / total) * 100 });
-        }
-
-        const modelBuffer = new Uint8Array(loaded);
-        let offset = 0;
-        for (const chunk of chunks) {
-            modelBuffer.set(chunk, offset);
-            offset += chunk.length;
-        }
-
-        session = await ort.InferenceSession.create(modelBuffer.buffer, { executionProviders: ['webgl', 'wasm'] });
-        self.postMessage({ type: 'modelLoaded' });
-    } catch (error) {
-        self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
-    }
-}
-
+                        const modelBuffer = new Uint8Array(loaded);
+                        let offset = 0;
+                        for (const chunk of chunks) {
+                            modelBuffer.set(chunk, offset);
+                            offset += chunk.length;
+                        }
+                        
+                        session = await ort.InferenceSession.create(modelBuffer.buffer, { executionProviders: ['webgl', 'wasm'] });
+                        self.postMessage({ type: 'modelLoaded' });
+                    } catch (error) {
+                        self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
+                    }
+                }
 
                 if (type === 'upscale') {
                     try {
@@ -294,7 +306,7 @@ export default function App() {
         link.click();
     };
 
-    const handleUpscale = async ({ model: modelId, format }) => {
+    const handleUpscale = async ({ model, format }) => {
         if (uploadedFiles.length === 0 || !workerRef.current) return;
         
         setIsProcessing(true);
@@ -316,7 +328,7 @@ export default function App() {
         
         workerRef.current.postMessage({ 
             type: 'loadModel', 
-            payload: { modelId, baseUrl: window.location.origin } 
+            payload: { modelUrl: model.url } 
         });
         
         try {
