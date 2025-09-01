@@ -156,7 +156,7 @@ export default function App() {
 
     // Effect to set up and tear down the web worker pool
     useEffect(() => {
-        const numWorkers = navigator.hardwareConcurrency || 2;
+        const numWorkers = navigator.hardwareConcurrency || 4; // Use available cores, default to 4
         const workerCode = `
             let session;
             self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
@@ -168,12 +168,11 @@ export default function App() {
                 if (type === 'loadModel') {
                     try {
                         const { modelUrl } = payload;
-                        if (!session) {
-                            const response = await fetch(modelUrl);
-                            if (!response.ok) throw new Error(\`HTTP \${response.status}: \${response.statusText}\`);
-                            const modelBuffer = await response.arrayBuffer();
-                            session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
-                        }
+                        // Always load the selected model, replacing the old one if it exists
+                        const response = await fetch(modelUrl);
+                        if (!response.ok) throw new Error(\`HTTP \${response.status}: \${response.statusText}\`);
+                        const modelBuffer = await response.arrayBuffer();
+                        session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
                         self.postMessage({ type: 'modelLoaded', workerId });
                     } catch (error) {
                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message }, workerId });
@@ -277,12 +276,15 @@ export default function App() {
         const modelReadyPromises = workerPool.current.map((worker, i) => 
             new Promise((resolve, reject) => {
                 const listener = (event) => {
-                    if (event.data.type === 'modelLoaded' && event.data.workerId === i) {
+                    const {type, workerId, payload} = event.data;
+                    if(workerId !== i) return;
+
+                    if (type === 'modelLoaded') {
                         worker.removeEventListener('message', listener);
                         resolve();
-                    } else if (event.data.type === 'error' && event.data.workerId === i) {
+                    } else if (type === 'error') {
                         worker.removeEventListener('message', listener);
-                        reject(new Error(event.data.payload.message));
+                        reject(new Error(payload.message));
                     }
                 };
                 worker.addEventListener('message', listener);
@@ -297,6 +299,7 @@ export default function App() {
             console.error('Model loading failed:', error);
             alert(`Failed to load model: ${error.message}`)
             setIsProcessing(false);
+            setModelLoadingState({isLoading: false, progress: 0});
             return; 
         }
         
@@ -340,9 +343,8 @@ export default function App() {
                         }
                     };
                     worker.addEventListener('message', listener);
-                    // Transfer only the main bitmap, not for every worker
-                    const transferable = workerId === 0 ? [originalBitmap] : [];
-                    worker.postMessage({ type: 'upscaleStrip', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight }, workerId }, transferable);
+                    // Pass the original bitmap to all workers; they won't modify it.
+                    worker.postMessage({ type: 'upscaleStrip', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight }, workerId });
                 })
             );
 
@@ -391,4 +393,3 @@ export default function App() {
         </div>
     );
 }
-
