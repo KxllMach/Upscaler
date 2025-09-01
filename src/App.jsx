@@ -140,67 +140,134 @@ export default function App() {
 
     // Effect to set up and tear down the web worker
     useEffect(() => {
-        const workerCode = `
-            let session;
-            self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
-            ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+       // Replace the worker code section in your useEffect with this updated version:
 
-            self.onmessage = async (event) => {
-                const { type, payload } = event.data;
+const workerCode = `
+    let session;
+    self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
+    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
 
-                if (type === 'loadModel') {
-                    try {
-                        const { modelId, baseUrl } = payload;
-                        const modelUrl = new URL(\`/models/\${modelId}\`, baseUrl).href;
-                        const response = await fetch(modelUrl);
-                        if (!response.ok) throw new Error(\`Fetch model failed: \${response.statusText}\`);
-                        
-                        const contentLength = +response.headers.get('Content-Length');
-                        const reader = response.body.getReader();
-                        let loaded = 0;
-                        const chunks = [];
-                        while (true) {
-                            const { done, value } = await reader.read();
-                            if (done) break;
-                            chunks.push(value);
-                            loaded += value.length;
-                            if (contentLength) self.postMessage({ type: 'modelLoadingProgress', progress: (loaded / contentLength) * 100 });
-                        }
+// Updated worker code without MODEL_URLS mapping - using direct paths
 
-                        const modelBuffer = await new Blob(chunks).arrayBuffer();
-                        session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
-                        self.postMessage({ type: 'modelLoaded' });
-                    } catch (error) {
-                        self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
+    self.onmessage = async (event) => {
+        const { type, payload } = event.data;
+
+        if (type === 'loadModel') {
+            try {
+                const { modelId } = payload;
+                
+                // Construct the model URL directly
+                const modelUrl = \`/models/\${modelId}\`;
+                console.log(\`Loading model from: \${modelUrl}\`);
+                
+                const response = await fetch(modelUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/octet-stream'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(\`Failed to fetch model: \${response.status} \${response.statusText}\`);
+                }
+                
+                const contentLength = +response.headers.get('Content-Length');
+                const reader = response.body.getReader();
+                let loaded = 0;
+                const chunks = [];
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    loaded += value.length;
+                    if (contentLength) {
+                        self.postMessage({ 
+                            type: 'modelLoadingProgress', 
+                            progress: (loaded / contentLength) * 100 
+                        });
                     }
                 }
 
-                if (type === 'upscale') {
-                    try {
-                        const { imageBitmap } = payload;
-                        // --- PERFORMANCE UPDATE: Use OffscreenCanvas ---
-                        const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(imageBitmap, 0, 0);
-                        const imageData = ctx.getImageData(0, 0, imageBitmap.width, imageBitmap.height);
-
-                        const { data, width, height } = imageData;
-                        const float32Data = new Float32Array(3 * width * height);
-                        for (let i = 0; i < width * height; i++) {
-                            float32Data[i] = data[i * 4] / 255.0;
-                            float32Data[i + width * height] = data[i * 4 + 1] / 255.0;
-                            float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0;
-                        }
-                        const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
-                        const feeds = { [session.inputNames[0]]: inputTensor };
-                        const results = await session.run(feeds);
-                        self.postMessage({ type: 'upscaleComplete', outputTensor: results[session.outputNames[0]] });
-                    } catch (error) {
-                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
-                    }
+                const modelBuffer = await new Blob(chunks).arrayBuffer();
+                
+                // Validate that we have a non-empty buffer
+                if (modelBuffer.byteLength === 0) {
+                    throw new Error('Downloaded model file is empty');
                 }
-            };
-        `;
+                
+                console.log(\`Model buffer size: \${modelBuffer.byteLength} bytes\`);
+                
+                // Create the ONNX session with error handling
+                session = await ort.InferenceSession.create(modelBuffer, { 
+                    executionProviders: ['webgl', 'wasm'],
+                    logSeverityLevel: 0 // Enable detailed logging
+                });
+                
+                console.log('Model loaded successfully');
+                self.postMessage({ type: 'modelLoaded' });
+                
+            } catch (error) {
+                console.error('Model loading error:', error);
+                self.postMessage({ 
+                    type: 'error', 
+                    payload: { 
+                        name: error.name, 
+                        message: \`Model loading failed: \${error.message}\`
+                    } 
+                });
+            }
+        }
+
+        if (type === 'upscale') {
+            try {
+                if (!session) {
+                    throw new Error('Model not loaded. Please load a model first.');
+                }
+
+                const { imageBitmap } = payload;
+                
+                // Use OffscreenCanvas for better performance
+                const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(imageBitmap, 0, 0);
+                const imageData = ctx.getImageData(0, 0, imageBitmap.width, imageBitmap.height);
+
+                const { data, width, height } = imageData;
+                const float32Data = new Float32Array(3 * width * height);
+                
+                // Convert RGBA to RGB and normalize to [0,1]
+                for (let i = 0; i < width * height; i++) {
+                    float32Data[i] = data[i * 4] / 255.0;                           // R
+                    float32Data[i + width * height] = data[i * 4 + 1] / 255.0;      // G
+                    float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0;  // B
+                }
+                
+                const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
+                const feeds = { [session.inputNames[0]]: inputTensor };
+                
+                console.log('Running inference...');
+                const results = await session.run(feeds);
+                console.log('Inference complete');
+                
+                self.postMessage({ 
+                    type: 'upscaleComplete', 
+                    outputTensor: results[session.outputNames[0]] 
+                });
+                
+            } catch (error) {
+                console.error('Upscaling error:', error);
+                self.postMessage({ 
+                    type: 'error', 
+                    payload: { 
+                        name: error.name, 
+                        message: \`Upscaling failed: \${error.message}\`
+                    } 
+                });
+            }
+        }
+    };
+`;
         const blob = new Blob([workerCode], { type: 'application/javascript' });
         workerRef.current = new Worker(URL.createObjectURL(blob));
 
@@ -280,7 +347,7 @@ export default function App() {
             workerRef.current.addEventListener('message', listener);
         });
         
-        workerRef.current.postMessage({ type: 'loadModel', payload: { modelId, baseUrl: window.location.origin } });
+        wworkerRef.current.postMessage({ type: 'loadModel', payload: { modelId } });
         
         try {
             await modelReadyPromise;
