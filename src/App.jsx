@@ -210,26 +210,69 @@ export default function App() {
 
                 if (type === 'upscale') {
                     try {
-                         if (!session) {
+                        if (!session) {
                             throw new Error('Model session is not available. Please load a model first.');
                         }
                         const { imageBitmap } = payload;
-                        const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(imageBitmap, 0, 0);
-                        const imageData = ctx.getImageData(0, 0, imageBitmap.width, imageBitmap.height);
+                        
+                        // --- TILING IMPLEMENTATION ---
+                        const TILE_SIZE = 64; // The model expects 64x64 tiles
+                        const SCALE = 4;
+                        const upscaledWidth = imageBitmap.width * SCALE;
+                        const upscaledHeight = imageBitmap.height * SCALE;
 
-                        const { data, width, height } = imageData;
-                        const float32Data = new Float32Array(3 * width * height);
-                        for (let i = 0; i < width * height; i++) {
-                            float32Data[i] = data[i * 4] / 255.0;
-                            float32Data[i + width * height] = data[i * 4 + 1] / 255.0;
-                            float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0;
+                        const finalCanvas = new OffscreenCanvas(upscaledWidth, upscaledHeight);
+                        const finalCtx = finalCanvas.getContext('2d');
+                        
+                        let tilesProcessed = 0;
+                        const totalTiles = Math.ceil(imageBitmap.width / TILE_SIZE) * Math.ceil(imageBitmap.height / TILE_SIZE);
+
+                        for (let y = 0; y < imageBitmap.height; y += TILE_SIZE) {
+                            for (let x = 0; x < imageBitmap.width; x += TILE_SIZE) {
+                                const tile = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
+                                const tileCtx = tile.getContext('2d');
+                                tileCtx.drawImage(imageBitmap, x, y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
+                                const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
+
+                                const { data, width, height } = tileImageData;
+                                const float32Data = new Float32Array(3 * width * height);
+                                for (let i = 0; i < width * height; i++) {
+                                    float32Data[i] = data[i * 4] / 255.0;
+                                    float32Data[i + width * height] = data[i * 4 + 1] / 255.0;
+                                    float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0;
+                                }
+
+                                const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
+                                const feeds = { [session.inputNames[0]]: inputTensor };
+                                const results = await session.run(feeds);
+                                const outputTensor = results[session.outputNames[0]];
+
+                                // --- Draw upscaled tile to final canvas ---
+                                const upscaledTileCanvas = new OffscreenCanvas(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
+                                const upscaledTileCtx = upscaledTileCanvas.getContext('2d');
+                                const upscaledImageData = upscaledTileCtx.createImageData(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
+                                const upscaledData = upscaledImageData.data;
+
+                                for (let ty = 0; ty < TILE_SIZE * SCALE; ty++) {
+                                    for (let tx = 0; tx < TILE_SIZE * SCALE; tx++) {
+                                        const pos = (ty * (TILE_SIZE * SCALE) + tx);
+                                        const r = Math.min(255, Math.max(0, outputTensor.data[pos] * 255));
+                                        const g = Math.min(255, Math.max(0, outputTensor.data[pos + (TILE_SIZE * SCALE) ** 2] * 255));
+                                        const b = Math.min(255, Math.max(0, outputTensor.data[pos + 2 * (TILE_SIZE * SCALE) ** 2] * 255));
+                                        const idx = pos * 4;
+                                        upscaledData[idx] = r; upscaledData[idx + 1] = g; upscaledData[idx + 2] = b; upscaledData[idx + 3] = 255;
+                                    }
+                                }
+                                upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
+                                finalCtx.drawImage(upscaledTileCanvas, x * SCALE, y * SCALE);
+
+                                tilesProcessed++;
+                                self.postMessage({ type: 'tilingProgress', progress: (tilesProcessed / totalTiles) * 100 });
+                            }
                         }
-                        const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
-                        const feeds = { [session.inputNames[0]]: inputTensor };
-                        const results = await session.run(feeds);
-                        self.postMessage({ type: 'upscaleComplete', outputTensor: results[session.outputNames[0]] });
+                        
+                        const imageBlob = await finalCanvas.convertToBlob({ type: 'image/png' });
+                        self.postMessage({ type: 'upscaleComplete', imageBlob });
                     } catch (error) {
                          self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
                     }
@@ -241,8 +284,8 @@ export default function App() {
 
         workerRef.current.onmessage = (event) => {
             const { type, progress, payload } = event.data;
-            if (type === 'modelLoadingProgress') {
-                setModelLoadingState({ isLoading: true, progress });
+            if (type === 'modelLoadingProgress' || type === 'tilingProgress') {
+                setProcessingStatus(type === 'tilingProgress' ? `Processing tiles... ${progress.toFixed(0)}%` : 'Loading AI model...');
             } else if (type === 'modelLoaded') {
                 setModelLoadingState({ isLoading: false, progress: 100 });
             } else if (type === 'error') {
@@ -278,31 +321,14 @@ export default function App() {
     const handleFilesAdded = (newFiles) => { setUploadedFiles((prev) => [...prev, ...newFiles]); };
     const handleRemoveFile = (index) => { setUploadedFiles((prev) => prev.filter((_, i) => i !== index)); };
 
-    const tensorToImageAndDownload = (tensor, originalName, format) => {
-        const [batch, channels, height, width] = tensor.dims;
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        const imageData = ctx.createImageData(width, height);
-        const data = imageData.data;
-
-        for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-                const pos = (y * width + x);
-                const r = Math.min(255, Math.max(0, tensor.data[pos] * 255));
-                const g = Math.min(255, Math.max(0, tensor.data[pos + width * height] * 255));
-                const b = Math.min(255, Math.max(0, tensor.data[pos + 2 * width * height] * 255));
-                const idx = pos * 4;
-                data[idx] = r; data[idx + 1] = g; data[idx + 2] = b; data[idx + 3] = 255;
-            }
-        }
-        ctx.putImageData(imageData, 0, 0);
+    const blobToImageAndDownload = (blob, originalName, format) => {
+        const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         const fileExtension = format.toLowerCase();
         link.download = `${originalName.split('.').slice(0, -1).join('.')}_upscaled.${fileExtension}`;
-        link.href = canvas.toDataURL(`image/${fileExtension}`);
+        link.href = url;
         link.click();
+        URL.revokeObjectURL(url);
     };
 
     const handleUpscale = async ({ model, format }) => {
@@ -351,7 +377,7 @@ export default function App() {
                      const listener = (event) => {
                         if (event.data.type === 'upscaleComplete') {
                             workerRef.current.removeEventListener('message', listener);
-                            resolve(event.data.outputTensor);
+                            resolve(event.data.imageBlob);
                         } else if (event.data.type === 'error') {
                             workerRef.current.removeEventListener('message', listener);
                             reject(new Error(event.data.payload.message));
@@ -362,8 +388,8 @@ export default function App() {
                 
                 workerRef.current.postMessage({ type: 'upscale', payload: { imageBitmap } }, [imageBitmap]);
                 
-                const outputTensor = await upscalePromise;
-                tensorToImageAndDownload(outputTensor, file.name, format);
+                const imageBlob = await upscalePromise;
+                blobToImageAndDownload(imageBlob, file.name, format);
                 
             } catch (error) {
                 console.error(`Failed to process ${file.name}:`, error);
