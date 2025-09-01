@@ -152,9 +152,9 @@ export default function App() {
     const [processingStatus, setProcessingStatus] = useState('');
     const [modelLoadingState, setModelLoadingState] = useState({ isLoading: false, progress: 0 });
     const workerPool = useRef([]);
-    const progressRef = useRef([]);
+    const progressRef = useRef(0);
 
-    // Effect to set up and tear down the web worker
+    // Effect to set up and tear down the web worker pool
     useEffect(() => {
         const numWorkers = navigator.hardwareConcurrency || 2;
         const workerCode = `
@@ -168,7 +168,7 @@ export default function App() {
                 if (type === 'loadModel') {
                     try {
                         const { modelUrl } = payload;
-                        if (!session) { // Only load if session doesn't exist
+                        if (!session) {
                             const response = await fetch(modelUrl);
                             if (!response.ok) throw new Error(\`HTTP \${response.status}: \${response.statusText}\`);
                             const modelBuffer = await response.arrayBuffer();
@@ -180,7 +180,7 @@ export default function App() {
                     }
                 }
 
-                if (type === 'upscale') {
+                if (type === 'upscaleStrip') {
                     try {
                         if (!session) throw new Error('Session not ready.');
                         const { imageBitmap, startY, stripHeight } = payload;
@@ -307,9 +307,8 @@ export default function App() {
             const stripHeight = Math.ceil(originalBitmap.height / numWorkers);
 
             const totalTiles = Math.ceil(originalBitmap.width / 64) * Math.ceil(originalBitmap.height / 64);
-            progressRef.current = Array(numWorkers).fill(0);
-            let tilesProcessed = 0;
-
+            progressRef.current = 0;
+            
             const finalCanvas = document.createElement('canvas');
             finalCanvas.width = originalBitmap.width * 4;
             finalCanvas.height = originalBitmap.height * 4;
@@ -318,6 +317,10 @@ export default function App() {
             const upscalePromises = workerPool.current.map((worker, workerId) => 
                 new Promise((resolve, reject) => {
                     const startY = workerId * stripHeight;
+                    if (startY >= originalBitmap.height) {
+                        resolve(); // No work for this worker
+                        return;
+                    }
                     const currentStripHeight = Math.min(stripHeight, originalBitmap.height - startY);
                     
                     const listener = (event) => {
@@ -325,8 +328,8 @@ export default function App() {
                         if(msgWorkerId !== workerId) return;
 
                         if (type === 'tilingProgress') {
-                            tilesProcessed++;
-                            setProcessingStatus(`Processing... ${((tilesProcessed / totalTiles) * 100).toFixed(0)}%`);
+                            progressRef.current++;
+                            setProcessingStatus(`Processing... ${((progressRef.current / totalTiles) * 100).toFixed(0)}%`);
                         } else if (type === 'upscaleComplete') {
                             finalCtx.drawImage(upscaledStrip, 0, stripStartY);
                             worker.removeEventListener('message', listener);
@@ -337,7 +340,9 @@ export default function App() {
                         }
                     };
                     worker.addEventListener('message', listener);
-                    worker.postMessage({ type: 'upscale', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight }, workerId });
+                    // Transfer only the main bitmap, not for every worker
+                    const transferable = workerId === 0 ? [originalBitmap] : [];
+                    worker.postMessage({ type: 'upscaleStrip', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight }, workerId }, transferable);
                 })
             );
 
