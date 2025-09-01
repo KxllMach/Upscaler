@@ -144,6 +144,8 @@ export default function App() {
             let session;
             self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
 
+            ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+
             self.onmessage = async (event) => {
                 const { type, payload } = event.data;
 
