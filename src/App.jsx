@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // --- Helper Data & Components ---
 const AI_MODELS = [
-  { id: 'real_esrgan_x4_fp16.onnx', name: 'Lite', description: 'Lightweight model for quick processing with moderate quality improvements.' },
+  { id: 'real_esrgan_x4_fp16.onnx', name: 'ESRGAN', description: 'General purpose model for most images. Provides a good balance between detail and artifact reduction.' },
   { id: 'RealESRGAN_x4plus_anime_4B32F.onnx', name: 'ESRGAN Anime', description: 'Specialized model for anime and cartoon images with enhanced detail preservation.' },
-  { id: 'realesrgan-x4.onnx', name: 'ESRGAN', description: 'General purpose model for most images. Provides a good balance between detail and artifact reduction.' },
+  { id: 'realesrgan-x4.onnx', name: 'Lite', description: 'Lightweight model for quick processing with moderate quality improvements.' },
 ];
 const OUTPUT_FORMATS = ['PNG', 'JPEG', 'WEBP'];
 
@@ -155,13 +155,13 @@ export default function App() {
                         
                         const response = await fetch(modelUrl);
                         if (!response.ok) {
-                            throw new Error(\`HTTP \${response.status}: \${response.statusText} - Could not fetch model from \${modelUrl}\`);
+                            throw new Error(\`HTTP \${response.status}: \${response.statusText} - Could not fetch model.\`);
                         }
                         
                         const contentLength = response.headers.get('Content-Length');
                         if (!contentLength) {
                             const modelBuffer = await response.arrayBuffer();
-                            if (modelBuffer.byteLength === 0) throw new Error('Downloaded model file is empty');
+                            if (modelBuffer.byteLength === 0) throw new Error('Downloaded model file is empty.');
                             session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
                             self.postMessage({ type: 'modelLoaded' });
                             return;
@@ -170,7 +170,7 @@ export default function App() {
                         const reader = response.body.getReader();
                         let loaded = 0;
                         const chunks = [];
-                        const total = parseInt(contentLength);
+                        const total = parseInt(contentLength, 10);
                         
                         while (true) {
                             const { done, value } = await reader.read();
@@ -197,7 +197,7 @@ export default function App() {
                 if (type === 'upscale') {
                     try {
                          if (!session) {
-                            throw new Error('No model session available. Please load a model first.');
+                            throw new Error('Model session is not available. Please load a model first.');
                         }
                         const { imageBitmap } = payload;
                         const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
@@ -389,6 +389,5 @@ export default function App() {
             )}
         </div>
     );
-
 }
 
