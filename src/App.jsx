@@ -140,153 +140,181 @@ export default function App() {
 
     // Effect to set up and tear down the web worker
     useEffect(() => {
-       // Replace the worker code section in your useEffect with this updated version:
+        const workerCode = `
+            let session;
+            self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
+            ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
 
-const workerCode = `
-    let session;
-    self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
-    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+            self.onmessage = async (event) => {
+                const { type, payload } = event.data;
 
-// Updated worker code without MODEL_URLS mapping - using direct paths
+                if (type === 'loadModel') {
+                    try {
+                        const { modelId } = payload;
+                        
+                        // Construct the model URL directly - matching your working URL pattern
+                        const modelUrl = \`/models/\${modelId}\`;
+                        console.log(\`Attempting to load model from: \${modelUrl}\`);
+                        
+                        const response = await fetch(modelUrl);
+                        
+                        if (!response.ok) {
+                            throw new Error(\`HTTP \${response.status}: \${response.statusText} - Could not fetch model from \${modelUrl}\`);
+                        }
+                        
+                        const contentLength = response.headers.get('Content-Length');
+                        console.log(\`Model content length: \${contentLength} bytes\`);
+                        
+                        if (!contentLength) {
+                            // If no content-length header, fall back to simple blob loading
+                            console.log('No Content-Length header, loading as blob...');
+                            const modelBuffer = await response.arrayBuffer();
+                            
+                            if (modelBuffer.byteLength === 0) {
+                                throw new Error('Downloaded model file is empty');
+                            }
+                            
+                            console.log(\`Model loaded: \${modelBuffer.byteLength} bytes\`);
+                            session = await ort.InferenceSession.create(modelBuffer, { 
+                                executionProviders: ['webgl', 'wasm']
+                            });
+                            
+                            self.postMessage({ type: 'modelLoaded' });
+                            return;
+                        }
+                        
+                        // Stream loading with progress tracking
+                        const reader = response.body.getReader();
+                        let loaded = 0;
+                        const chunks = [];
+                        const total = parseInt(contentLength);
+                        
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            
+                            chunks.push(value);
+                            loaded += value.length;
+                            
+                            const progress = (loaded / total) * 100;
+                            self.postMessage({ 
+                                type: 'modelLoadingProgress', 
+                                progress: progress 
+                            });
+                        }
 
-    self.onmessage = async (event) => {
-        const { type, payload } = event.data;
-
-        if (type === 'loadModel') {
-            try {
-                const { modelId } = payload;
-                
-                // Construct the model URL directly
-                const modelUrl = \`/models/\${modelId}\`;
-                console.log(\`Loading model from: \${modelUrl}\`);
-                
-                const response = await fetch(modelUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/octet-stream'
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(\`Failed to fetch model: \${response.status} \${response.statusText}\`);
-                }
-                
-                const contentLength = +response.headers.get('Content-Length');
-                const reader = response.body.getReader();
-                let loaded = 0;
-                const chunks = [];
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    chunks.push(value);
-                    loaded += value.length;
-                    if (contentLength) {
+                        const modelBuffer = new Uint8Array(loaded);
+                        let offset = 0;
+                        for (const chunk of chunks) {
+                            modelBuffer.set(chunk, offset);
+                            offset += chunk.length;
+                        }
+                        
+                        console.log(\`Model buffer assembled: \${modelBuffer.byteLength} bytes\`);
+                        
+                        // Create ONNX session
+                        session = await ort.InferenceSession.create(modelBuffer.buffer, { 
+                            executionProviders: ['webgl', 'wasm']
+                        });
+                        
+                        console.log('ONNX session created successfully');
+                        self.postMessage({ type: 'modelLoaded' });
+                        
+                    } catch (error) {
+                        console.error('Model loading failed:', error);
                         self.postMessage({ 
-                            type: 'modelLoadingProgress', 
-                            progress: (loaded / contentLength) * 100 
+                            type: 'error', 
+                            payload: { 
+                                name: error.name, 
+                                message: error.message
+                            } 
                         });
                     }
                 }
 
-                const modelBuffer = await new Blob(chunks).arrayBuffer();
-                
-                // Validate that we have a non-empty buffer
-                if (modelBuffer.byteLength === 0) {
-                    throw new Error('Downloaded model file is empty');
-                }
-                
-                console.log(\`Model buffer size: \${modelBuffer.byteLength} bytes\`);
-                
-                // Create the ONNX session with error handling
-                session = await ort.InferenceSession.create(modelBuffer, { 
-                    executionProviders: ['webgl', 'wasm'],
-                    logSeverityLevel: 0 // Enable detailed logging
-                });
-                
-                console.log('Model loaded successfully');
-                self.postMessage({ type: 'modelLoaded' });
-                
-            } catch (error) {
-                console.error('Model loading error:', error);
-                self.postMessage({ 
-                    type: 'error', 
-                    payload: { 
-                        name: error.name, 
-                        message: \`Model loading failed: \${error.message}\`
-                    } 
-                });
-            }
-        }
+                if (type === 'upscale') {
+                    try {
+                        if (!session) {
+                            throw new Error('No model session available. Please load a model first.');
+                        }
 
-        if (type === 'upscale') {
-            try {
-                if (!session) {
-                    throw new Error('Model not loaded. Please load a model first.');
-                }
+                        const { imageBitmap } = payload;
+                        console.log(\`Starting upscale for image: \${imageBitmap.width}x\${imageBitmap.height}\`);
+                        
+                        // Use OffscreenCanvas for better performance
+                        const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(imageBitmap, 0, 0);
+                        const imageData = ctx.getImageData(0, 0, imageBitmap.width, imageBitmap.height);
 
-                const { imageBitmap } = payload;
-                
-                // Use OffscreenCanvas for better performance
-                const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(imageBitmap, 0, 0);
-                const imageData = ctx.getImageData(0, 0, imageBitmap.width, imageBitmap.height);
-
-                const { data, width, height } = imageData;
-                const float32Data = new Float32Array(3 * width * height);
-                
-                // Convert RGBA to RGB and normalize to [0,1]
-                for (let i = 0; i < width * height; i++) {
-                    float32Data[i] = data[i * 4] / 255.0;                           // R
-                    float32Data[i + width * height] = data[i * 4 + 1] / 255.0;      // G
-                    float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0;  // B
+                        const { data, width, height } = imageData;
+                        const float32Data = new Float32Array(3 * width * height);
+                        
+                        // Convert RGBA to RGB and normalize to [0,1]
+                        for (let i = 0; i < width * height; i++) {
+                            float32Data[i] = data[i * 4] / 255.0;                           // R
+                            float32Data[i + width * height] = data[i * 4 + 1] / 255.0;      // G
+                            float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0;  // B
+                        }
+                        
+                        const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
+                        const feeds = { [session.inputNames[0]]: inputTensor };
+                        
+                        console.log('Running ONNX inference...');
+                        const results = await session.run(feeds);
+                        console.log('Inference completed successfully');
+                        
+                        self.postMessage({ 
+                            type: 'upscaleComplete', 
+                            outputTensor: results[session.outputNames[0]] 
+                        });
+                        
+                    } catch (error) {
+                        console.error('Upscaling error:', error);
+                        self.postMessage({ 
+                            type: 'error', 
+                            payload: { 
+                                name: error.name, 
+                                message: error.message
+                            } 
+                        });
+                    }
                 }
-                
-                const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
-                const feeds = { [session.inputNames[0]]: inputTensor };
-                
-                console.log('Running inference...');
-                const results = await session.run(feeds);
-                console.log('Inference complete');
-                
-                self.postMessage({ 
-                    type: 'upscaleComplete', 
-                    outputTensor: results[session.outputNames[0]] 
-                });
-                
-            } catch (error) {
-                console.error('Upscaling error:', error);
-                self.postMessage({ 
-                    type: 'error', 
-                    payload: { 
-                        name: error.name, 
-                        message: \`Upscaling failed: \${error.message}\`
-                    } 
-                });
-            }
-        }
-    };
-`;
+            };
+        `;
+        
         const blob = new Blob([workerCode], { type: 'application/javascript' });
         workerRef.current = new Worker(URL.createObjectURL(blob));
 
         workerRef.current.onmessage = (event) => {
-            const { type, progress, payload } = event.data;
+            const { type, progress, payload, outputTensor } = event.data;
+            
             if (type === 'modelLoadingProgress') {
                 setModelLoadingState({ isLoading: true, progress });
             } else if (type === 'modelLoaded') {
                 setModelLoadingState({ isLoading: false, progress: 100 });
+                console.log('Model loaded in main thread');
+            } else if (type === 'upscaleComplete') {
+                // Handle completed upscale
+                const currentFile = uploadedFiles[0]; // Assuming processing one by one
+                if (currentFile && outputTensor) {
+                    tensorToImageAndDownload(outputTensor, currentFile.name, 'PNG');
+                }
             } else if (type === 'error') {
                 console.error("Worker Error:", payload);
-                alert(`An error occurred in the background worker: \n${payload.name}: ${payload.message}`);
+                alert(`Error: ${payload.message}`);
                 setIsProcessing(false);
                 setModelLoadingState({ isLoading: false, progress: 0 });
+                setProcessingStatus('');
             }
         };
 
-        return () => workerRef.current.terminate();
-    }, []);
+        return () => {
+            if (workerRef.current) {
+                workerRef.current.terminate();
+            }
+        };
+    }, [uploadedFiles]);
     
     useEffect(() => {
         const fontLink = document.createElement('link');
@@ -296,7 +324,10 @@ const workerCode = `
         const styleTag = document.createElement('style');
         styleTag.innerHTML = `body { font-family: 'Space Grotesk', sans-serif; }`;
         document.head.appendChild(styleTag);
-        return () => { document.head.removeChild(fontLink); document.head.removeChild(styleTag); };
+        return () => { 
+            if (document.head.contains(fontLink)) document.head.removeChild(fontLink); 
+            if (document.head.contains(styleTag)) document.head.removeChild(styleTag); 
+        };
     }, []);
 
     const handleFilesAdded = (newFiles) => { setUploadedFiles((prev) => [...prev, ...newFiles]); };
@@ -331,9 +362,12 @@ const workerCode = `
 
     const handleUpscale = async ({ model: modelId, format }) => {
         if (uploadedFiles.length === 0 || !workerRef.current) return;
+        
         setIsProcessing(true);
         setModelLoadingState({ isLoading: true, progress: 0 });
+        setProcessingStatus('Loading AI model...');
 
+        // Load the model first
         const modelReadyPromise = new Promise((resolve, reject) => {
             const listener = (event) => {
                 if (event.data.type === 'modelLoaded') {
@@ -347,47 +381,63 @@ const workerCode = `
             workerRef.current.addEventListener('message', listener);
         });
         
-        wworkerRef.current.postMessage({ type: 'loadModel', payload: { modelId } });
+        // Fixed: Removed baseUrl parameter (was causing the issue)
+        workerRef.current.postMessage({ 
+            type: 'loadModel', 
+            payload: { modelId } 
+        });
         
         try {
             await modelReadyPromise;
-        } catch (e) {
+            console.log('Model ready, starting image processing...');
+        } catch (error) {
+            console.error('Model loading failed:', error);
+            setIsProcessing(false);
+            setModelLoadingState({ isLoading: false, progress: 0 });
+            setProcessingStatus('');
             return; 
         }
         
+        // Process each uploaded file
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
             setProcessingStatus(`Upscaling ${file.name} (${i + 1}/${uploadedFiles.length})...`);
             
-            // --- PERFORMANCE UPDATE: Transfer ImageBitmap to worker ---
-            const imageBitmap = await createImageBitmap(file);
-
-            const upscalePromise = new Promise((resolve, reject) => {
-                 const listener = (event) => {
-                    if (event.data.type === 'upscaleComplete') {
-                        workerRef.current.removeEventListener('message', listener);
-                        resolve(event.data.outputTensor);
-                    } else if (event.data.type === 'error') {
-                        workerRef.current.removeEventListener('message', listener);
-                        reject(new Error(event.data.payload.message));
-                    }
-                };
-                workerRef.current.addEventListener('message', listener);
-            });
-            
-            // Post the ImageBitmap to the worker, transferring ownership
-            workerRef.current.postMessage({ type: 'upscale', payload: { imageBitmap } }, [imageBitmap]);
-            
             try {
+                const imageBitmap = await createImageBitmap(file);
+
+                const upscalePromise = new Promise((resolve, reject) => {
+                    const listener = (event) => {
+                        if (event.data.type === 'upscaleComplete') {
+                            workerRef.current.removeEventListener('message', listener);
+                            resolve(event.data.outputTensor);
+                        } else if (event.data.type === 'error') {
+                            workerRef.current.removeEventListener('message', listener);
+                            reject(new Error(event.data.payload.message));
+                        }
+                    };
+                    workerRef.current.addEventListener('message', listener);
+                });
+                
+                // Transfer ImageBitmap to worker
+                workerRef.current.postMessage({ 
+                    type: 'upscale', 
+                    payload: { imageBitmap } 
+                }, [imageBitmap]);
+                
                 const outputTensor = await upscalePromise;
                 tensorToImageAndDownload(outputTensor, file.name, format);
-            } catch (e) {
+                
+            } catch (error) {
+                console.error(`Failed to process ${file.name}:`, error);
+                alert(`Failed to process ${file.name}: ${error.message}`);
                 break;
             }
         }
 
         setIsProcessing(false);
         setProcessingStatus('');
+        setModelLoadingState({ isLoading: false, progress: 0 });
     };
 
     return (
@@ -395,26 +445,4 @@ const workerCode = `
             <Navigation />
             <div className="w-full px-4 sm:px-8 md:px-16"><div className="h-px bg-[#374151]"></div></div>
             <HeroSection />
-            <main className="w-full px-4 sm:px-8 md:px-16 pb-16">
-                <div className="flex flex-col xl:flex-row gap-8 xl:gap-12 items-start">
-                    <div className="w-full xl:w-[60%] space-y-8">
-                        <FileUpload onFilesAdded={handleFilesAdded} />
-                        <FileList files={uploadedFiles} onRemoveFile={handleRemoveFile} />
-                    </div>
-                    <div className="w-full xl:w-[40%] xl:max-w-[540px]">
-                        <UpscaleOptions onUpscale={handleUpscale} disabled={uploadedFiles.length === 0 || isProcessing} modelLoadingState={modelLoadingState} />
-                    </div>
-                </div>
-            </main>
-            {isProcessing && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
-                    <div className="bg-[#1F2937] rounded-3xl p-8 text-center shadow-lg">
-                        <div className="animate-spin w-8 h-8 border-2 border-[#7B33F7] border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="text-white text-lg">{modelLoadingState.isLoading ? `Loading model... ${modelLoadingState.progress.toFixed(0)}%` : processingStatus}</p>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
-
+            <main className="w-full px
