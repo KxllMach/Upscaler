@@ -151,87 +151,50 @@ export default function App() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [processingStatus, setProcessingStatus] = useState('');
     const [modelLoadingState, setModelLoadingState] = useState({ isLoading: false, progress: 0 });
-    const workerRef = useRef(null);
+    const workerPool = useRef([]);
+    const progressRef = useRef([]);
 
     // Effect to set up and tear down the web worker
     useEffect(() => {
+        const numWorkers = navigator.hardwareConcurrency || 2;
         const workerCode = `
             let session;
             self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
             ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
 
             self.onmessage = async (event) => {
-                const { type, payload } = event.data;
+                const { type, payload, workerId } = event.data;
 
                 if (type === 'loadModel') {
                     try {
                         const { modelUrl } = payload;
-                        
-                        const response = await fetch(modelUrl);
-                        if (!response.ok) {
-                            throw new Error(\`HTTP \${response.status}: \${response.statusText} - Could not fetch model.\`);
-                        }
-                        
-                        const contentLength = response.headers.get('Content-Length');
-                        if (!contentLength) {
+                        if (!session) { // Only load if session doesn't exist
+                            const response = await fetch(modelUrl);
+                            if (!response.ok) throw new Error(\`HTTP \${response.status}: \${response.statusText}\`);
                             const modelBuffer = await response.arrayBuffer();
-                            if (modelBuffer.byteLength === 0) throw new Error('Downloaded model file is empty.');
                             session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
-                            self.postMessage({ type: 'modelLoaded' });
-                            return;
                         }
-
-                        const reader = response.body.getReader();
-                        let loaded = 0;
-                        const chunks = [];
-                        const total = parseInt(contentLength, 10);
-                        
-                        while (true) {
-                            const { done, value } = await reader.read();
-                            if (done) break;
-                            chunks.push(value);
-                            loaded += value.length;
-                            self.postMessage({ type: 'modelLoadingProgress', progress: (loaded / total) * 100 });
-                        }
-
-                        const modelBuffer = new Uint8Array(loaded);
-                        let offset = 0;
-                        for (const chunk of chunks) {
-                            modelBuffer.set(chunk, offset);
-                            offset += chunk.length;
-                        }
-                        
-                        session = await ort.InferenceSession.create(modelBuffer.buffer, { executionProviders: ['webgl', 'wasm'] });
-                        self.postMessage({ type: 'modelLoaded' });
+                        self.postMessage({ type: 'modelLoaded', workerId });
                     } catch (error) {
-                        self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
+                        self.postMessage({ type: 'error', payload: { name: error.name, message: error.message }, workerId });
                     }
                 }
 
                 if (type === 'upscale') {
                     try {
-                        if (!session) {
-                            throw new Error('Model session is not available. Please load a model first.');
-                        }
-                        const { imageBitmap } = payload;
+                        if (!session) throw new Error('Session not ready.');
+                        const { imageBitmap, startY, stripHeight } = payload;
                         
-                        // --- TILING IMPLEMENTATION ---
-                        const TILE_SIZE = 64; // The model expects 64x64 tiles
+                        const TILE_SIZE = 64;
                         const SCALE = 4;
-                        const upscaledWidth = imageBitmap.width * SCALE;
-                        const upscaledHeight = imageBitmap.height * SCALE;
+                        const finalStrip = new OffscreenCanvas(imageBitmap.width * SCALE, stripHeight * SCALE);
+                        const finalCtx = finalStrip.getContext('2d');
 
-                        const finalCanvas = new OffscreenCanvas(upscaledWidth, upscaledHeight);
-                        const finalCtx = finalCanvas.getContext('2d');
-                        
-                        let tilesProcessed = 0;
-                        const totalTiles = Math.ceil(imageBitmap.width / TILE_SIZE) * Math.ceil(imageBitmap.height / TILE_SIZE);
-
-                        for (let y = 0; y < imageBitmap.height; y += TILE_SIZE) {
+                        for (let y = 0; y < stripHeight; y += TILE_SIZE) {
                             for (let x = 0; x < imageBitmap.width; x += TILE_SIZE) {
                                 const tile = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
                                 const tileCtx = tile.getContext('2d');
-                                tileCtx.drawImage(imageBitmap, x, y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
+                                tileCtx.drawImage(imageBitmap, x, y + startY, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
                                 const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
 
                                 const { data, width, height } = tileImageData;
@@ -241,18 +204,16 @@ export default function App() {
                                     float32Data[i + width * height] = data[i * 4 + 1] / 255.0;
                                     float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0;
                                 }
-
+                                
                                 const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
                                 const feeds = { [session.inputNames[0]]: inputTensor };
                                 const results = await session.run(feeds);
                                 const outputTensor = results[session.outputNames[0]];
 
-                                // --- Draw upscaled tile to final canvas ---
                                 const upscaledTileCanvas = new OffscreenCanvas(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
                                 const upscaledTileCtx = upscaledTileCanvas.getContext('2d');
                                 const upscaledImageData = upscaledTileCtx.createImageData(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
                                 const upscaledData = upscaledImageData.data;
-
                                 for (let ty = 0; ty < TILE_SIZE * SCALE; ty++) {
                                     for (let tx = 0; tx < TILE_SIZE * SCALE; tx++) {
                                         const pos = (ty * (TILE_SIZE * SCALE) + tx);
@@ -266,41 +227,26 @@ export default function App() {
                                 upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
                                 finalCtx.drawImage(upscaledTileCanvas, x * SCALE, y * SCALE);
 
-                                tilesProcessed++;
-                                self.postMessage({ type: 'tilingProgress', progress: (tilesProcessed / totalTiles) * 100 });
+                                self.postMessage({ type: 'tilingProgress', workerId });
                             }
                         }
-                        
-                        const imageBlob = await finalCanvas.convertToBlob({ type: 'image/png' });
-                        self.postMessage({ type: 'upscaleComplete', imageBlob });
+                        const finalStripBitmap = await finalStrip.transferToImageBitmap();
+                        self.postMessage({ type: 'upscaleComplete', upscaledStrip: finalStripBitmap, startY: startY * SCALE, workerId }, [finalStripBitmap]);
                     } catch (error) {
-                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
+                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message }, workerId });
                     }
                 }
             };
         `;
         const blob = new Blob([workerCode], { type: 'application/javascript' });
-        workerRef.current = new Worker(URL.createObjectURL(blob));
-
-        workerRef.current.onmessage = (event) => {
-            const { type, progress, payload } = event.data;
-            if (type === 'modelLoadingProgress' || type === 'tilingProgress') {
-                setProcessingStatus(type === 'tilingProgress' ? `Processing tiles... ${progress.toFixed(0)}%` : 'Loading AI model...');
-            } else if (type === 'modelLoaded') {
-                setModelLoadingState({ isLoading: false, progress: 100 });
-            } else if (type === 'error') {
-                console.error("Worker Error:", payload);
-                alert(`Error: ${payload.message}`);
-                setIsProcessing(false);
-                setModelLoadingState({ isLoading: false, progress: 0 });
-                setProcessingStatus('');
-            }
-        };
+        const workerUrl = URL.createObjectURL(blob);
+        for(let i=0; i<numWorkers; i++){
+            workerPool.current.push(new Worker(workerUrl));
+        }
 
         return () => {
-            if (workerRef.current) {
-                workerRef.current.terminate();
-            }
+            workerPool.current.forEach(w => w.terminate());
+            URL.revokeObjectURL(workerUrl);
         };
     }, []);
     
@@ -321,86 +267,96 @@ export default function App() {
     const handleFilesAdded = (newFiles) => { setUploadedFiles((prev) => [...prev, ...newFiles]); };
     const handleRemoveFile = (index) => { setUploadedFiles((prev) => prev.filter((_, i) => i !== index)); };
 
-    const blobToImageAndDownload = (blob, originalName, format) => {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        const fileExtension = format.toLowerCase();
-        link.download = `${originalName.split('.').slice(0, -1).join('.')}_upscaled.${fileExtension}`;
-        link.href = url;
-        link.click();
-        URL.revokeObjectURL(url);
-    };
-
     const handleUpscale = async ({ model, format }) => {
-        if (uploadedFiles.length === 0 || !workerRef.current) return;
+        if (uploadedFiles.length === 0 || workerPool.current.length === 0) return;
         
         setIsProcessing(true);
-        setModelLoadingState({ isLoading: true, progress: 0 });
         setProcessingStatus('Loading AI model...');
+        setModelLoadingState({ isLoading: true, progress: 0 });
 
-        const modelReadyPromise = new Promise((resolve, reject) => {
-            const listener = (event) => {
-                if (event.data.type === 'modelLoaded') {
-                    workerRef.current.removeEventListener('message', listener);
-                    resolve();
-                } else if (event.data.type === 'error') {
-                    workerRef.current.removeEventListener('message', listener);
-                    reject(new Error(event.data.payload.message));
-                }
-            };
-            workerRef.current.addEventListener('message', listener);
-        });
-        
-        workerRef.current.postMessage({ 
-            type: 'loadModel', 
-            payload: { modelUrl: model.url } 
-        });
+        const modelReadyPromises = workerPool.current.map((worker, i) => 
+            new Promise((resolve, reject) => {
+                const listener = (event) => {
+                    if (event.data.type === 'modelLoaded' && event.data.workerId === i) {
+                        worker.removeEventListener('message', listener);
+                        resolve();
+                    } else if (event.data.type === 'error' && event.data.workerId === i) {
+                        worker.removeEventListener('message', listener);
+                        reject(new Error(event.data.payload.message));
+                    }
+                };
+                worker.addEventListener('message', listener);
+                worker.postMessage({ type: 'loadModel', payload: { modelUrl: model.url }, workerId: i });
+            })
+        );
         
         try {
-            await modelReadyPromise;
+            await Promise.all(modelReadyPromises);
+             setModelLoadingState({ isLoading: false, progress: 100 });
         } catch (error) {
             console.error('Model loading failed:', error);
+            alert(`Failed to load model: ${error.message}`)
             setIsProcessing(false);
-            setModelLoadingState({ isLoading: false, progress: 0 });
-            setProcessingStatus('');
             return; 
         }
         
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
-            setProcessingStatus(`Upscaling ${file.name} (${i + 1}/${uploadedFiles.length})...`);
-            
-            try {
-                const imageBitmap = await createImageBitmap(file);
+            const originalBitmap = await createImageBitmap(file);
+            const numWorkers = workerPool.current.length;
+            const stripHeight = Math.ceil(originalBitmap.height / numWorkers);
 
-                const upscalePromise = new Promise((resolve, reject) => {
-                     const listener = (event) => {
-                        if (event.data.type === 'upscaleComplete') {
-                            workerRef.current.removeEventListener('message', listener);
-                            resolve(event.data.imageBlob);
-                        } else if (event.data.type === 'error') {
-                            workerRef.current.removeEventListener('message', listener);
-                            reject(new Error(event.data.payload.message));
+            const totalTiles = Math.ceil(originalBitmap.width / 64) * Math.ceil(originalBitmap.height / 64);
+            progressRef.current = Array(numWorkers).fill(0);
+            let tilesProcessed = 0;
+
+            const finalCanvas = document.createElement('canvas');
+            finalCanvas.width = originalBitmap.width * 4;
+            finalCanvas.height = originalBitmap.height * 4;
+            const finalCtx = finalCanvas.getContext('2d');
+
+            const upscalePromises = workerPool.current.map((worker, workerId) => 
+                new Promise((resolve, reject) => {
+                    const startY = workerId * stripHeight;
+                    const currentStripHeight = Math.min(stripHeight, originalBitmap.height - startY);
+                    
+                    const listener = (event) => {
+                        const { type, upscaledStrip, startY: stripStartY, payload, workerId: msgWorkerId } = event.data;
+                        if(msgWorkerId !== workerId) return;
+
+                        if (type === 'tilingProgress') {
+                            tilesProcessed++;
+                            setProcessingStatus(`Processing... ${((tilesProcessed / totalTiles) * 100).toFixed(0)}%`);
+                        } else if (type === 'upscaleComplete') {
+                            finalCtx.drawImage(upscaledStrip, 0, stripStartY);
+                            worker.removeEventListener('message', listener);
+                            resolve();
+                        } else if (type === 'error') {
+                            worker.removeEventListener('message', listener);
+                            reject(new Error(payload.message));
                         }
                     };
-                    workerRef.current.addEventListener('message', listener);
-                });
-                
-                workerRef.current.postMessage({ type: 'upscale', payload: { imageBitmap } }, [imageBitmap]);
-                
-                const imageBlob = await upscalePromise;
-                blobToImageAndDownload(imageBlob, file.name, format);
-                
+                    worker.addEventListener('message', listener);
+                    worker.postMessage({ type: 'upscale', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight }, workerId });
+                })
+            );
+
+            try {
+                await Promise.all(upscalePromises);
+                const link = document.createElement('a');
+                const fileExtension = format.toLowerCase();
+                link.download = `${file.name.split('.').slice(0, -1).join('.')}_upscaled.${fileExtension}`;
+                link.href = finalCanvas.toDataURL(`image/${fileExtension}`);
+                link.click();
             } catch (error) {
-                console.error(`Failed to process ${file.name}:`, error);
-                alert(`Failed to process ${file.name}: ${error.message || 'An unknown error occurred during upscaling.'}`);
+                 console.error(`Failed to process ${file.name}:`, error);
+                alert(`Failed to process ${file.name}: ${error.message}`);
                 break;
             }
         }
 
         setIsProcessing(false);
         setProcessingStatus('');
-        setModelLoadingState({ isLoading: false, progress: 0 });
     };
 
     return (
@@ -423,7 +379,7 @@ export default function App() {
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
                     <div className="bg-[#1F2937] rounded-3xl p-8 text-center shadow-lg">
                         <div className="animate-spin w-8 h-8 border-2 border-[#7B33F7] border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="text-white text-lg">{modelLoadingState.isLoading ? `Loading model... ${modelLoadingState.progress.toFixed(0)}%` : processingStatus}</p>
+                        <p className="text-white text-lg">{processingStatus || 'Initializing...'}</p>
                     </div>
                 </div>
             )}
