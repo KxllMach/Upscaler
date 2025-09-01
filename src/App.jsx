@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // --- Helper Data & Components ---
+// Note: Model order has been updated to match your latest request.
 const AI_MODELS = [
   { id: 'real_esrgan_x4_fp16.onnx', name: 'ESRGAN', description: 'General purpose model for most images. Provides a good balance between detail and artifact reduction.' },
   { id: 'RealESRGAN_x4plus_anime_4B32F.onnx', name: 'ESRGAN Anime', description: 'Specialized model for anime and cartoon images with enhanced detail preservation.' },
@@ -353,7 +354,7 @@ export default function App() {
                 
             } catch (error) {
                 console.error(`Failed to process ${file.name}:`, error);
-                alert(`Failed to process ${file.name}: ${error.message}`);
+                alert(`Failed to process ${file.name}: ${error.message || 'An unknown error occurred during upscaling.'}`);
                 break;
             }
         }
