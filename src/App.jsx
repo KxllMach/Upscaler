@@ -6,7 +6,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 
 const AI_MODELS = [
   { id: 'realesrgan-x4.onnx', name: 'ESRGAN', description: 'General purpose model for most images. Provides a good balance between detail and artifact reduction.' },
-  { id: 'RealESRGAN_x4plus_anime_4B3F.onnx', name: 'ESRGAN Anime', description: 'Specialized model for anime and cartoon images with enhanced detail preservation.' },
+  { id: 'RealESRGAN_x4plus_anime_4B32F.onnx', name: 'ESRGAN Anime', description: 'Specialized model for anime and cartoon images with enhanced detail preservation.' },
   { id: 'real_esrgan_x4_fp16.onnx', name: 'Lite', description: 'Lightweight model for quick processing with moderate quality improvements.' },
 ];
 
