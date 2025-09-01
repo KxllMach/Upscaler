@@ -322,7 +322,7 @@ export default function App() {
                 new Promise((resolve, reject) => {
                     const startY = workerId * stripHeight;
                     if (startY >= originalBitmap.height) {
-                        resolve(); // No work for this worker
+                        resolve();
                         return;
                     }
                     const currentStripHeight = Math.min(stripHeight, originalBitmap.height - startY);
@@ -344,7 +344,6 @@ export default function App() {
                         }
                     };
                     worker.addEventListener('message', listener);
-                    // The main bitmap can be sent to all workers as it is read-only
                     worker.postMessage({ type: 'upscaleStrip', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight }, workerId });
                 })
             );
