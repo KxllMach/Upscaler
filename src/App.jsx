@@ -153,6 +153,7 @@ export default function App() {
     const [modelLoadingState, setModelLoadingState] = useState({ isLoading: false, progress: 0 });
     const workerPool = useRef([]);
     const progressRef = useRef(0);
+    const modelLoaded = useRef(null);
 
     // Effect to set up and tear down the web worker pool
     useEffect(() => {
@@ -183,20 +184,26 @@ export default function App() {
                 if (type === 'upscaleStrip') {
                     try {
                         if (!session) throw new Error('Session not ready.');
-                        const { imageBitmap, startY, stripHeight } = payload;
+                        const { imageBitmap, startY, stripHeight, originalWidth, originalHeight } = payload;
                         
                         const TILE_SIZE = 64;
+                        const TILE_OVERLAP = 8;
                         const SCALE = 4;
-                        const finalStrip = new OffscreenCanvas(imageBitmap.width * SCALE, stripHeight * SCALE);
+                        const finalStrip = new OffscreenCanvas(originalWidth * SCALE, stripHeight * SCALE);
                         const finalCtx = finalStrip.getContext('2d');
 
                         for (let y = 0; y < stripHeight; y += TILE_SIZE) {
-                            for (let x = 0; x < imageBitmap.width; x += TILE_SIZE) {
-                                const tile = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
-                                const tileCtx = tile.getContext('2d');
-                                tileCtx.drawImage(imageBitmap, x, y + startY, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
-                                const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
-
+                            for (let x = 0; x < originalWidth; x += TILE_SIZE) {
+                                const tileX = Math.max(0, x - TILE_OVERLAP);
+                                const tileY = Math.max(0, y - TILE_OVERLAP);
+                                const tileW = TILE_SIZE + (x > 0 ? TILE_OVERLAP : 0) + (x + TILE_SIZE < originalWidth ? TILE_OVERLAP : 0);
+                                const tileH = TILE_SIZE + (y > 0 ? TILE_OVERLAP : 0) + (y + TILE_SIZE < stripHeight ? TILE_OVERLAP : 0);
+                                
+                                const tileCanvas = new OffscreenCanvas(tileW, tileH);
+                                const tileCtx = tileCanvas.getContext('2d');
+                                tileCtx.drawImage(imageBitmap, tileX, tileY + startY, tileW, tileH, 0, 0, tileW, tileH);
+                                const tileImageData = tileCtx.getImageData(0, 0, tileW, tileH);
+                                
                                 const { data, width, height } = tileImageData;
                                 const float32Data = new Float32Array(3 * width * height);
                                 for (let i = 0; i < width * height; i++) {
@@ -210,23 +217,28 @@ export default function App() {
                                 const results = await session.run(feeds);
                                 const outputTensor = results[session.outputNames[0]];
 
-                                const upscaledTileCanvas = new OffscreenCanvas(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
+                                const upscaledTileCanvas = new OffscreenCanvas(width * SCALE, height * SCALE);
                                 const upscaledTileCtx = upscaledTileCanvas.getContext('2d');
-                                const upscaledImageData = upscaledTileCtx.createImageData(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
+                                const upscaledImageData = upscaledTileCtx.createImageData(width * SCALE, height * SCALE);
                                 const upscaledData = upscaledImageData.data;
-                                for (let ty = 0; ty < TILE_SIZE * SCALE; ty++) {
-                                    for (let tx = 0; tx < TILE_SIZE * SCALE; tx++) {
-                                        const pos = (ty * (TILE_SIZE * SCALE) + tx);
+                                for (let ty = 0; ty < height * SCALE; ty++) {
+                                    for (let tx = 0; tx < width * SCALE; tx++) {
+                                        const pos = (ty * width * SCALE + tx);
                                         const r = Math.min(255, Math.max(0, outputTensor.data[pos] * 255));
-                                        const g = Math.min(255, Math.max(0, outputTensor.data[pos + (TILE_SIZE * SCALE) ** 2] * 255));
-                                        const b = Math.min(255, Math.max(0, outputTensor.data[pos + 2 * (TILE_SIZE * SCALE) ** 2] * 255));
+                                        const g = Math.min(255, Math.max(0, outputTensor.data[pos + (width * SCALE) * (height * SCALE)] * 255));
+                                        const b = Math.min(255, Math.max(0, outputTensor.data[pos + 2 * (width * SCALE) * (height * SCALE)] * 255));
                                         const idx = pos * 4;
                                         upscaledData[idx] = r; upscaledData[idx + 1] = g; upscaledData[idx + 2] = b; upscaledData[idx + 3] = 255;
                                     }
                                 }
                                 upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
-                                finalCtx.drawImage(upscaledTileCanvas, x * SCALE, y * SCALE);
 
+                                const cropX = (x > 0 ? TILE_OVERLAP : 0) * SCALE;
+                                const cropY = (y > 0 ? TILE_OVERLAP : 0) * SCALE;
+                                const cropW = TILE_SIZE * SCALE;
+                                const cropH = TILE_SIZE * SCALE;
+
+                                finalCtx.drawImage(upscaledTileCanvas, cropX, cropY, cropW, cropH, x * SCALE, y * SCALE, cropW, cropH);
                                 self.postMessage({ type: 'tilingProgress', workerId });
                             }
                         }
@@ -274,34 +286,39 @@ export default function App() {
         setProcessingStatus('Loading AI model...');
         setModelLoadingState({ isLoading: true, progress: 0 });
 
-        const modelReadyPromises = workerPool.current.map((worker, i) => 
-            new Promise((resolve, reject) => {
-                const listener = (event) => {
-                    const {type, workerId, payload} = event.data;
-                    if(workerId !== i) return;
+        if(model.id !== modelLoaded.current) {
+            const modelReadyPromises = workerPool.current.map((worker, i) => 
+                new Promise((resolve, reject) => {
+                    const listener = (event) => {
+                        const {type, workerId, payload} = event.data;
+                        if(workerId !== i) return;
 
-                    if (type === 'modelLoaded') {
-                        worker.removeEventListener('message', listener);
-                        resolve();
-                    } else if (type === 'error') {
-                        worker.removeEventListener('message', listener);
-                        reject(new Error(payload.message));
-                    }
-                };
-                worker.addEventListener('message', listener);
-                worker.postMessage({ type: 'loadModel', payload: { modelUrl: model.url }, workerId: i });
-            })
-        );
-        
-        try {
-            await Promise.all(modelReadyPromises);
+                        if (type === 'modelLoaded') {
+                            worker.removeEventListener('message', listener);
+                            resolve();
+                        } else if (type === 'error') {
+                            worker.removeEventListener('message', listener);
+                            reject(new Error(payload.message));
+                        }
+                    };
+                    worker.addEventListener('message', listener);
+                    worker.postMessage({ type: 'loadModel', payload: { modelUrl: model.url }, workerId: i });
+                })
+            );
+            
+            try {
+                await Promise.all(modelReadyPromises);
+                modelLoaded.current = model.id;
+                setModelLoadingState({ isLoading: false, progress: 100 });
+            } catch (error) {
+                console.error('Model loading failed:', error);
+                alert(`Failed to load model: ${error.message}`)
+                setIsProcessing(false);
+                setModelLoadingState({isLoading: false, progress: 0});
+                return; 
+            }
+        } else {
              setModelLoadingState({ isLoading: false, progress: 100 });
-        } catch (error) {
-            console.error('Model loading failed:', error);
-            alert(`Failed to load model: ${error.message}`)
-            setIsProcessing(false);
-            setModelLoadingState({isLoading: false, progress: 0});
-            return; 
         }
         
         for (let i = 0; i < uploadedFiles.length; i++) {
@@ -344,7 +361,7 @@ export default function App() {
                         }
                     };
                     worker.addEventListener('message', listener);
-                    worker.postMessage({ type: 'upscaleStrip', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight }, workerId });
+                    worker.postMessage({ type: 'upscaleStrip', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight, originalWidth: originalBitmap.width, originalHeight: originalBitmap.height }, workerId });
                 })
             );
 
