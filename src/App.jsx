@@ -156,7 +156,7 @@ export default function App() {
 
     // Effect to set up and tear down the web worker pool
     useEffect(() => {
-        const numWorkers = navigator.hardwareConcurrency || 4; // Use available cores, default to 4
+        const numWorkers = navigator.hardwareConcurrency || 4;
         const workerCode = `
             let session;
             self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
@@ -168,11 +168,12 @@ export default function App() {
                 if (type === 'loadModel') {
                     try {
                         const { modelUrl } = payload;
-                        // Always load the selected model, replacing the old one if it exists
-                        const response = await fetch(modelUrl);
-                        if (!response.ok) throw new Error(\`HTTP \${response.status}: \${response.statusText}\`);
-                        const modelBuffer = await response.arrayBuffer();
-                        session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
+                        if (!session) { 
+                            const response = await fetch(modelUrl);
+                            if (!response.ok) throw new Error(\`HTTP \${response.status}: \${response.statusText}\`);
+                            const modelBuffer = await response.arrayBuffer();
+                            session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
+                        }
                         self.postMessage({ type: 'modelLoaded', workerId });
                     } catch (error) {
                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message }, workerId });
@@ -343,7 +344,7 @@ export default function App() {
                         }
                     };
                     worker.addEventListener('message', listener);
-                    // Pass the original bitmap to all workers; they won't modify it.
+                    // The main bitmap can be sent to all workers as it is read-only
                     worker.postMessage({ type: 'upscaleStrip', payload: { imageBitmap: originalBitmap, startY, stripHeight: currentStripHeight }, workerId });
                 })
             );
@@ -386,10 +387,11 @@ export default function App() {
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
                     <div className="bg-[#1F2937] rounded-3xl p-8 text-center shadow-lg">
                         <div className="animate-spin w-8 h-8 border-2 border-[#7B33F7] border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="text-white text-lg">{processingStatus || 'Initializing...'}</p>
+                        <p className="text-white text-lg">{modelLoadingState.isLoading ? `Loading model...` : processingStatus}</p>
                     </div>
                 </div>
             )}
         </div>
     );
 }
+
