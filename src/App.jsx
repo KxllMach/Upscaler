@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-// Note: onnxruntime-web is now imported dynamically inside the handleUpscale function
-// to prevent build errors in environments like Vite.
+// onnxruntime-web will be imported dynamically inside the main logic
+// to prevent browser-bundling errors with Node.js modules.
 
 // --- Helper Data & Components ---
 
+// Updated to use the EXACT filenames from your repository screenshot
 const AI_MODELS = [
   { id: 'realesrgan-x4.onnx', name: 'ESRGAN', description: 'General purpose model for most images. Provides a good balance between detail and artifact reduction.' },
   { id: 'RealESRGAN_x4plus_anime_4B32F.onnx', name: 'ESRGAN Anime', description: 'Specialized model for anime and cartoon images with enhanced detail preservation.' },
@@ -138,6 +139,7 @@ const UpscaleOptions = ({ onUpscale, disabled = false, modelLoadingState }) => {
 export default function App() {
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [processingStatus, setProcessingStatus] = useState('');
     const [modelLoadingState, setModelLoadingState] = useState({ isLoading: false, progress: 0 });
     const [session, setSession] = useState(null);
 
@@ -155,57 +157,123 @@ export default function App() {
     const handleFilesAdded = (newFiles) => { setUploadedFiles((prev) => [...prev, ...newFiles]); };
     const handleRemoveFile = (index) => { setUploadedFiles((prev) => prev.filter((_, i) => i !== index)); };
 
+    // --- Image Processing & Download Logic ---
+    const imageToTensor = async (file) => {
+        // Dynamically import here to keep it contained
+        const ort = await import('onnxruntime-web');
+        const image = new Image();
+        const reader = new FileReader();
+        
+        return new Promise((resolve, reject) => {
+            reader.onload = (e) => {
+                image.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = image.width;
+                    canvas.height = image.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(image, 0, 0);
+                    const imageData = ctx.getImageData(0, 0, image.width, image.height);
+                    
+                    const { data, width, height } = imageData;
+                    const float32Data = new Float32Array(3 * width * height);
+                    
+                    for (let i = 0; i < width * height; i++) {
+                        float32Data[i] = data[i * 4] / 255.0;           // R
+                        float32Data[i + width * height] = data[i * 4 + 1] / 255.0; // G
+                        float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0; // B
+                    }
+                    
+                    const tensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
+                    resolve(tensor);
+                };
+                image.src = e.target.result;
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    };
+
+    const tensorToImageAndDownload = (tensor, originalName, format) => {
+        const [batch, channels, height, width] = tensor.dims;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.createImageData(width, height);
+        const data = imageData.data;
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const pos = (y * width + x);
+                const r = Math.min(255, Math.max(0, tensor.data[pos] * 255));
+                const g = Math.min(255, Math.max(0, tensor.data[pos + width * height] * 255));
+                const b = Math.min(255, Math.max(0, tensor.data[pos + 2 * width * height] * 255));
+                const idx = pos * 4;
+                data[idx] = r;
+                data[idx + 1] = g;
+                data[idx + 2] = b;
+                data[idx + 3] = 255;
+            }
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        const link = document.createElement('a');
+        const fileExtension = format.toLowerCase();
+        link.download = `${originalName.split('.').slice(0, -1).join('.')}_upscaled.${fileExtension}`;
+        link.href = canvas.toDataURL(`image/${fileExtension}`);
+        link.click();
+    };
+
     const handleUpscale = async ({ model: modelId, format }) => {
         if (uploadedFiles.length === 0) return;
 
-        setIsProcessing(true);
-
+        let currentSession = session;
+        
         try {
-            // Dynamically import ONNX runtime to fix build errors
             const ort = await import('onnxruntime-web');
-            
+
             // --- Model Loading ---
-            setModelLoadingState({ isLoading: true, progress: 0 });
-            const modelUrl = `/models/${modelId}`;
-            
-            // Use fetch with a custom reader to track download progress
-            const modelResponse = await fetch(modelUrl);
-            if (!modelResponse.ok) {
-                throw new Error(`Failed to fetch model: ${modelResponse.statusText}`);
-            }
-            const contentLength = +modelResponse.headers.get('Content-Length');
-            let loaded = 0;
-            const reader = modelResponse.body.getReader();
-            const chunks = [];
-            while(true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-                loaded += value.length;
-                if (contentLength) {
-                    setModelLoadingState({ isLoading: true, progress: (loaded / contentLength) * 100 });
+            if (!currentSession) {
+                setModelLoadingState({ isLoading: true, progress: 0 });
+                const modelUrl = `/models/${modelId}`;
+                const modelResponse = await fetch(modelUrl);
+                if (!modelResponse.ok) throw new Error(`Failed to fetch model: ${modelResponse.statusText}`);
+                const contentLength = +modelResponse.headers.get('Content-Length');
+                let loaded = 0;
+                const reader = modelResponse.body.getReader();
+                const chunks = [];
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    loaded += value.length;
+                    if (contentLength) setModelLoadingState({ isLoading: true, progress: (loaded / contentLength) * 100 });
                 }
+                const modelBuffer = await new Blob(chunks).arrayBuffer();
+                currentSession = await ort.InferenceSession.create(modelBuffer);
+                setSession(currentSession);
+                setModelLoadingState({ isLoading: false, progress: 100 });
             }
-            
-            const modelBuffer = await new Blob(chunks).arrayBuffer();
-            const newSession = await ort.InferenceSession.create(modelBuffer);
-            setSession(newSession);
-            setModelLoadingState({ isLoading: false, progress: 100 });
 
-            // --- Image Processing (Placeholder) ---
-            console.log(`Session created for ${modelId}. Ready to process images.`);
-            // This is where you would loop through uploadedFiles, preprocess them, run inference, and postprocess.
-            // For now, we'll just simulate the processing time.
-            await new Promise(resolve => setTimeout(resolve, 1000 * uploadedFiles.length));
+            // --- Image Processing Loop ---
+            setIsProcessing(true);
+            for (let i = 0; i < uploadedFiles.length; i++) {
+                const file = uploadedFiles[i];
+                setProcessingStatus(`Upscaling ${file.name} (${i + 1}/${uploadedFiles.length})...`);
+                const inputTensor = await imageToTensor(file);
+                const feeds = { [currentSession.inputNames[0]]: inputTensor };
+                const results = await currentSession.run(feeds);
+                tensorToImageAndDownload(results[currentSession.outputNames[0]], file.name, format);
+            }
+            setProcessingStatus('Upscaling complete!');
             
-            alert(`Successfully processed ${uploadedFiles.length} images with ${modelId}!`);
-
         } catch (error) {
             console.error("Upscaling failed:", error);
             alert("An error occurred during upscaling. Check the console for details.");
         } finally {
             setIsProcessing(false);
             setModelLoadingState({ isLoading: false, progress: 0 });
+            setProcessingStatus('');
         }
     };
 
@@ -229,7 +297,7 @@ export default function App() {
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
                     <div className="bg-[#1F2937] rounded-3xl p-8 text-center shadow-lg">
                         <div className="animate-spin w-8 h-8 border-2 border-[#7B33F7] border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="text-white text-lg">Upscaling images...</p>
+                        <p className="text-white text-lg">{processingStatus || "Upscaling images..."}</p>
                     </div>
                 </div>
             )}
