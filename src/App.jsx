@@ -144,6 +144,7 @@ export default function App() {
             let session;
             self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
 
+            // Set the path for the WASM backend files to prevent path errors
             ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
 
             self.onmessage = async (event) => {
@@ -152,7 +153,6 @@ export default function App() {
                 if (type === 'loadModel') {
                     try {
                         const { modelId, baseUrl } = payload;
-                        // Construct the full URL for the model inside the worker
                         const modelUrl = new URL(\`/models/\${modelId}\`, baseUrl).href;
                         
                         const response = await fetch(modelUrl);
@@ -174,10 +174,12 @@ export default function App() {
                         }
 
                         const modelBuffer = await new Blob(chunks).arrayBuffer();
-                        session = await ort.InferenceSession.create(modelBuffer);
+                        // --- PERFORMANCE UPDATE: USE GPU (WebGL) with fallback to CPU (WASM) ---
+                        session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
                         self.postMessage({ type: 'modelLoaded' });
                     } catch (error) {
-                        self.postMessage({ type: 'error', message: error.message });
+                        // Send the full error object back to the main thread
+                        self.postMessage({ type: 'error', payload: { name: error.name, message: error.message, stack: error.stack } });
                     }
                 }
 
@@ -196,7 +198,7 @@ export default function App() {
                         const results = await session.run(feeds);
                         self.postMessage({ type: 'upscaleComplete', outputTensor: results[session.outputNames[0]] });
                     } catch (error) {
-                        self.postMessage({ type: 'error', message: error.message });
+                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message, stack: error.stack } });
                     }
                 }
             };
@@ -205,16 +207,15 @@ export default function App() {
         workerRef.current = new Worker(URL.createObjectURL(blob));
 
         workerRef.current.onmessage = (event) => {
-            const { type, progress, outputTensor, message } = event.data;
+            const { type, progress, outputTensor, payload } = event.data;
             if (type === 'modelLoadingProgress') {
                 setModelLoadingState({ isLoading: true, progress });
             } else if (type === 'modelLoaded') {
                 setModelLoadingState({ isLoading: false, progress: 100 });
-            } else if (type === 'upscaleComplete') {
-                // This is now handled within the handleUpscale loop
             } else if (type === 'error') {
-                console.error("Worker Error:", message);
-                alert("An error occurred in the background worker: " + message);
+                console.error("Worker Error:", payload);
+                // --- UI UPDATE: Show detailed error ---
+                alert(`An error occurred in the background worker: \n${payload.name}: ${payload.message}`);
                 setIsProcessing(false);
                 setModelLoadingState({ isLoading: false, progress: 0 });
             }
@@ -276,20 +277,18 @@ export default function App() {
                     resolve();
                 } else if (event.data.type === 'error') {
                     workerRef.current.removeEventListener('message', listener);
-                    reject(new Error(event.data.message));
+                    reject(new Error(event.data.payload.message));
                 }
             };
             workerRef.current.addEventListener('message', listener);
         });
         
-        // Pass the base URL to the worker
         workerRef.current.postMessage({ type: 'loadModel', payload: { modelId, baseUrl: window.location.origin } });
         
         try {
             await modelReadyPromise;
-        } catch(e) {
-            // Error is already alerted by the worker's onmessage handler
-            return; // Stop execution if model fails to load
+        } catch (e) {
+            return; 
         }
         
         for (let i = 0; i < uploadedFiles.length; i++) {
@@ -311,7 +310,7 @@ export default function App() {
                         resolve(event.data.outputTensor);
                     } else if (event.data.type === 'error') {
                         workerRef.current.removeEventListener('message', listener);
-                        reject(new Error(event.data.message));
+                        reject(new Error(event.data.payload.message));
                     }
                 };
                 workerRef.current.addEventListener('message', listener);
@@ -322,8 +321,7 @@ export default function App() {
             try {
                 const outputTensor = await upscalePromise;
                 tensorToImageAndDownload(outputTensor, file.name, format);
-            } catch(e) {
-                // Error is already alerted, just stop this loop
+            } catch (e) {
                 break;
             }
         }
@@ -359,5 +357,4 @@ export default function App() {
         </div>
     );
 }
-
 
