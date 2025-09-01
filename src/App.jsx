@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // --- Helper Data & Components ---
-// Models are now mapped to their permanent Hugging Face URLs.
 const AI_MODELS = [
   { 
-    id: 'real_esrgan_x4_fp16.onnx', 
+    id: 'realesrgan-x4.onnx', 
     name: 'ESRGAN', 
     description: 'General purpose model for most images. Provides a good balance between detail and artifact reduction.',
-    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/real_esrgan_x4_fp16.onnx' 
+    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/realesrgan-x4.onnx' 
   },
   { 
     id: 'RealESRGAN_x4plus_anime_4B32F.onnx', 
@@ -16,10 +15,10 @@ const AI_MODELS = [
     url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/RealESRGAN_x4plus_anime_4B32F.onnx' 
   },
   { 
-    id: 'realesrgan-x4.onnx', 
+    id: 'real_esrgan_x4_fp16.onnx', 
     name: 'Lite', 
     description: 'Lightweight model for quick processing with moderate quality improvements.',
-    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/realesrgan-x4.onnx'
+    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/real_esrgan_x4_fp16.onnx'
   },
 ];
 const OUTPUT_FORMATS = ['PNG', 'JPEG', 'WEBP'];
