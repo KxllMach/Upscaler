@@ -143,8 +143,6 @@ export default function App() {
         const workerCode = `
             let session;
             self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
-
-            // Set the path for the WASM backend files to prevent path errors
             ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
 
             self.onmessage = async (event) => {
@@ -154,38 +152,38 @@ export default function App() {
                     try {
                         const { modelId, baseUrl } = payload;
                         const modelUrl = new URL(\`/models/\${modelId}\`, baseUrl).href;
-                        
                         const response = await fetch(modelUrl);
-                        if (!response.ok) throw new Error(\`Failed to fetch model. Status: \${response.statusText}\`);
+                        if (!response.ok) throw new Error(\`Fetch model failed: \${response.statusText}\`);
                         
                         const contentLength = +response.headers.get('Content-Length');
                         const reader = response.body.getReader();
                         let loaded = 0;
                         const chunks = [];
-
                         while (true) {
                             const { done, value } = await reader.read();
                             if (done) break;
                             chunks.push(value);
                             loaded += value.length;
-                            if (contentLength) {
-                                self.postMessage({ type: 'modelLoadingProgress', progress: (loaded / contentLength) * 100 });
-                            }
+                            if (contentLength) self.postMessage({ type: 'modelLoadingProgress', progress: (loaded / contentLength) * 100 });
                         }
 
                         const modelBuffer = await new Blob(chunks).arrayBuffer();
-                        // --- PERFORMANCE UPDATE: USE GPU (WebGL) with fallback to CPU (WASM) ---
                         session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
                         self.postMessage({ type: 'modelLoaded' });
                     } catch (error) {
-                        // Send the full error object back to the main thread
-                        self.postMessage({ type: 'error', payload: { name: error.name, message: error.message, stack: error.stack } });
+                        self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
                     }
                 }
 
                 if (type === 'upscale') {
                     try {
-                        const { imageData } = payload;
+                        const { imageBitmap } = payload;
+                        // --- PERFORMANCE UPDATE: Use OffscreenCanvas ---
+                        const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(imageBitmap, 0, 0);
+                        const imageData = ctx.getImageData(0, 0, imageBitmap.width, imageBitmap.height);
+
                         const { data, width, height } = imageData;
                         const float32Data = new Float32Array(3 * width * height);
                         for (let i = 0; i < width * height; i++) {
@@ -198,7 +196,7 @@ export default function App() {
                         const results = await session.run(feeds);
                         self.postMessage({ type: 'upscaleComplete', outputTensor: results[session.outputNames[0]] });
                     } catch (error) {
-                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message, stack: error.stack } });
+                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
                     }
                 }
             };
@@ -207,14 +205,13 @@ export default function App() {
         workerRef.current = new Worker(URL.createObjectURL(blob));
 
         workerRef.current.onmessage = (event) => {
-            const { type, progress, outputTensor, payload } = event.data;
+            const { type, progress, payload } = event.data;
             if (type === 'modelLoadingProgress') {
                 setModelLoadingState({ isLoading: true, progress });
             } else if (type === 'modelLoaded') {
                 setModelLoadingState({ isLoading: false, progress: 100 });
             } else if (type === 'error') {
                 console.error("Worker Error:", payload);
-                // --- UI UPDATE: Show detailed error ---
                 alert(`An error occurred in the background worker: \n${payload.name}: ${payload.message}`);
                 setIsProcessing(false);
                 setModelLoadingState({ isLoading: false, progress: 0 });
@@ -294,14 +291,9 @@ export default function App() {
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
             setProcessingStatus(`Upscaling ${file.name} (${i + 1}/${uploadedFiles.length})...`);
-
+            
+            // --- PERFORMANCE UPDATE: Transfer ImageBitmap to worker ---
             const imageBitmap = await createImageBitmap(file);
-            const canvas = document.createElement('canvas');
-            canvas.width = imageBitmap.width;
-            canvas.height = imageBitmap.height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(imageBitmap, 0, 0);
-            const imageData = ctx.getImageData(0, 0, imageBitmap.width, imageBitmap.height);
 
             const upscalePromise = new Promise((resolve, reject) => {
                  const listener = (event) => {
@@ -316,7 +308,8 @@ export default function App() {
                 workerRef.current.addEventListener('message', listener);
             });
             
-            workerRef.current.postMessage({ type: 'upscale', payload: { imageData } });
+            // Post the ImageBitmap to the worker, transferring ownership
+            workerRef.current.postMessage({ type: 'upscale', payload: { imageBitmap } }, [imageBitmap]);
             
             try {
                 const outputTensor = await upscalePromise;
