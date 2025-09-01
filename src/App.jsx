@@ -150,50 +150,52 @@ export default function App() {
                 const { type, payload } = event.data;
 
                 if (type === 'loadModel') {
-                    try {
-                        const { modelId, baseUrl } = payload;
-                        const modelUrl = new URL(\`/models/\${modelId}\`, baseUrl).href;
-                        
-                        const response = await fetch(modelUrl);
-                        if (!response.ok) {
-                            throw new Error(\`HTTP \${response.status}: \${response.statusText} - Could not fetch model.\`);
-                        }
-                        
-                        const contentLength = response.headers.get('Content-Length');
-                        if (!contentLength) {
-                            const modelBuffer = await response.arrayBuffer();
-                            if (modelBuffer.byteLength === 0) throw new Error('Downloaded model file is empty.');
-                            session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
-                            self.postMessage({ type: 'modelLoaded' });
-                            return;
-                        }
+    try {
+        const { modelId } = payload;
+        const modelUrl = `/models/${modelId}`;
+        console.log("Fetching model from:", modelUrl);
 
-                        const reader = response.body.getReader();
-                        let loaded = 0;
-                        const chunks = [];
-                        const total = parseInt(contentLength, 10);
-                        
-                        while (true) {
-                            const { done, value } = await reader.read();
-                            if (done) break;
-                            chunks.push(value);
-                            loaded += value.length;
-                            self.postMessage({ type: 'modelLoadingProgress', progress: (loaded / total) * 100 });
-                        }
+        const response = await fetch(modelUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText} - Could not fetch model.`);
+        }
 
-                        const modelBuffer = new Uint8Array(loaded);
-                        let offset = 0;
-                        for (const chunk of chunks) {
-                            modelBuffer.set(chunk, offset);
-                            offset += chunk.length;
-                        }
-                        
-                        session = await ort.InferenceSession.create(modelBuffer.buffer, { executionProviders: ['webgl', 'wasm'] });
-                        self.postMessage({ type: 'modelLoaded' });
-                    } catch (error) {
-                        self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
-                    }
-                }
+        const contentLength = response.headers.get('Content-Length');
+        if (!contentLength) {
+            const modelBuffer = await response.arrayBuffer();
+            if (modelBuffer.byteLength === 0) throw new Error('Downloaded model file is empty.');
+            session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
+            self.postMessage({ type: 'modelLoaded' });
+            return;
+        }
+
+        const reader = response.body.getReader();
+        let loaded = 0;
+        const chunks = [];
+        const total = parseInt(contentLength, 10);
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            loaded += value.length;
+            self.postMessage({ type: 'modelLoadingProgress', progress: (loaded / total) * 100 });
+        }
+
+        const modelBuffer = new Uint8Array(loaded);
+        let offset = 0;
+        for (const chunk of chunks) {
+            modelBuffer.set(chunk, offset);
+            offset += chunk.length;
+        }
+
+        session = await ort.InferenceSession.create(modelBuffer.buffer, { executionProviders: ['webgl', 'wasm'] });
+        self.postMessage({ type: 'modelLoaded' });
+    } catch (error) {
+        self.postMessage({ type: 'error', payload: { name: error.name, message: error.message } });
+    }
+}
+
 
                 if (type === 'upscale') {
                     try {
