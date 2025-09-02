@@ -196,8 +196,10 @@ export default function App() {
                             for (let x = 0; x < paddedBitmap.width; x += TILE_SIZE) {
                                 const tileCanvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
                                 const tileCtx = tileCanvas.getContext('2d');
-                                // Draw from the correct strip starting position
+                                
+                                // THIS IS A CRITICAL BUG FIX: Draw from the correct global Y position of the image
                                 tileCtx.drawImage(paddedBitmap, x, startY + y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
+                                
                                 const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
                                 
                                 const { data, width, height } = tileImageData;
@@ -369,12 +371,13 @@ export default function App() {
                         }
                     };
                     worker.addEventListener('message', listener);
-                    // This is the corrected line
+                    
+                    // THIS IS THE FIX: We remove the second argument to safely clone the bitmap for each worker.
                     worker.postMessage({ 
                         type: 'upscaleStrip', 
                         payload: { paddedBitmap: paddedBitmap, startY: startY, stripHeight: currentStripHeight }, 
                         workerId: workerId 
-                    }, [paddedBitmap]);
+                    });
                 })
             );
 
