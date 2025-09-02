@@ -2,21 +2,21 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // --- Helper Data & Components ---
 const AI_MODELS = [
-  { 
-    id: 'realesrgan-x4.onnx', 
-    name: 'ESRGAN', 
-    description: 'General purpose model for most images. Provides a good balance between detail and artifact reduction.',
-    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/realesrgan-x4.onnx' 
+  {
+    id: 'model.onnx',
+    name: 'SwinIR',
+    description: 'A powerful Transformer-based model for high-quality, general-purpose upscaling.',
+    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/model.onnx'
   },
-  { 
-    id: 'RealESRGAN_x4plus_anime_4B32F.onnx', 
-    name: 'ESRGAN Anime', 
+  {
+    id: 'RealESRGAN_x4plus_anime_4B32F.onnx',
+    name: 'ESRGAN Anime',
     description: 'Specialized model for anime and cartoon images with enhanced detail preservation.',
-    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/RealESRGAN_x4plus_anime_4B32F.onnx' 
+    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/RealESRGAN_x4plus_anime_4B32F.onnx'
   },
-  { 
-    id: 'real_esrgan_x4_fp16.onnx', 
-    name: 'Lite', 
+  {
+    id: 'real_esrgan_x4_fp16.onnx',
+    name: 'Lite',
     description: 'Lightweight model for quick processing with moderate quality improvements.',
     url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/real_esrgan_x4_fp16.onnx'
   },
@@ -418,4 +418,3 @@ export default function App() {
         </div>
     );
 }
-
