@@ -154,7 +154,6 @@ export default function App() {
     const workerPool = useRef([]);
     const progressRef = useRef(0);
     const modelLoaded = useRef(null);
-    // --- KEY CHANGE ---: Ref to store the downloaded model data
     const modelBuffer = useRef(null);
 
     // Effect to set up and tear down the web worker pool
@@ -170,7 +169,6 @@ export default function App() {
 
                 if (type === 'loadModel') {
                     try {
-                        // --- KEY CHANGE ---: The worker now receives the raw model data, it does NOT fetch.
                         const { modelBuffer } = payload;
                         if (!session) { 
                             session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
@@ -184,7 +182,7 @@ export default function App() {
                 if (type === 'upscaleStrip') {
                     try {
                         if (!session) throw new Error('Session not ready.');
-                        const { stripBitmap, startY } = payload;
+                        const { stripBitmap, startY, topOverlap, bottomOverlap } = payload;
                         
                         const TILE_SIZE = 64;
                         const SCALE = 4;
@@ -238,7 +236,18 @@ export default function App() {
                                 self.postMessage({ type: 'tilingProgress', workerId });
                             }
                         }
-                        const finalStripBitmap = finalStrip.transferToImageBitmap();
+
+                        // --- OVERLAP FIX ---
+                        // Crop the upscaled overlap before sending the result back
+                        const croppedWidth = finalStrip.width;
+                        const croppedHeight = finalStrip.height - (topOverlap * SCALE) - (bottomOverlap * SCALE);
+                        
+                        const croppedCanvas = new OffscreenCanvas(croppedWidth, croppedHeight);
+                        const croppedCtx = croppedCanvas.getContext('2d');
+
+                        croppedCtx.drawImage(finalStrip, 0, topOverlap * SCALE, croppedWidth, croppedHeight, 0, 0, croppedWidth, croppedHeight);
+
+                        const finalStripBitmap = croppedCanvas.transferToImageBitmap();
                         self.postMessage({ type: 'upscaleComplete', payload: { upscaledStrip: finalStripBitmap, startY: startY * SCALE }, workerId }, [finalStripBitmap]);
                     } catch (error) {
                          self.postMessage({ type: 'error', payload: { name: error.name, message: error.message, stack: error.stack }, workerId });
@@ -284,7 +293,6 @@ export default function App() {
 
         if (model.id !== modelLoaded.current) {
             try {
-                // --- KEY CHANGE ---: Download the model ONCE here on the main thread.
                 setProcessingStatus('Downloading model...');
                 const response = await fetch(model.url);
                 if (!response.ok) throw new Error(`Failed to download model: ${response.statusText}`);
@@ -306,7 +314,6 @@ export default function App() {
                             }
                         };
                         worker.addEventListener('message', listener);
-                        // Send the downloaded buffer to the worker. A copy is made automatically.
                         worker.postMessage({ type: 'loadModel', payload: { modelBuffer: modelBuffer.current }, workerId: i });
                     })
                 );
@@ -343,20 +350,39 @@ export default function App() {
             const totalTiles = Math.ceil(paddedWidth / TILE_SIZE) * Math.ceil(paddedHeight / TILE_SIZE);
             progressRef.current = 0;
 
-            const finalPaddedCanvas = document.createElement('canvas');
+            let finalPaddedCanvas = document.createElement('canvas');
             finalPaddedCanvas.width = paddedWidth * 4;
             finalPaddedCanvas.height = paddedHeight * 4;
             const finalPaddedCtx = finalPaddedCanvas.getContext('2d');
 
             const upscalePromises = workerPool.current.map((worker, workerId) =>
                 new Promise(async (resolve, reject) => {
-                    const startY = workerId * stripHeight;
+                    // --- OVERLAP FIX ---
+                    const OVERLAP = 16; // Overlap in pixels for low-res image
+                    let startY = workerId * stripHeight;
+                    let currentStripHeight = Math.min(stripHeight, paddedHeight - startY);
+
+                    let topOverlap = 0;
+                    let bottomOverlap = 0;
+
+                    // Add top overlap if not the first strip
+                    if (workerId > 0) {
+                        topOverlap = Math.min(OVERLAP, startY);
+                        startY -= topOverlap;
+                        currentStripHeight += topOverlap;
+                    }
+                    
+                    // Add bottom overlap if not the last strip
+                    if (workerId < numWorkers - 1) {
+                        bottomOverlap = Math.min(OVERLAP, paddedHeight - (startY + currentStripHeight));
+                        currentStripHeight += bottomOverlap;
+                    }
+
                     if (startY >= paddedHeight) {
                         resolve();
                         return;
                     }
-                    const currentStripHeight = Math.min(stripHeight, paddedHeight - startY);
-
+                    
                     const stripCanvas = new OffscreenCanvas(paddedWidth, currentStripHeight);
                     const stripCtx = stripCanvas.getContext('2d');
                     stripCtx.drawImage(paddedCanvas, 0, startY, paddedWidth, currentStripHeight, 0, 0, paddedWidth, currentStripHeight);
@@ -370,7 +396,8 @@ export default function App() {
                             progressRef.current++;
                             setProcessingStatus(`Processing... ${((progressRef.current / totalTiles) * 100).toFixed(0)}%`);
                         } else if (type === 'upscaleComplete') {
-                            finalPaddedCtx.drawImage(payload.upscaledStrip, 0, payload.startY);
+                            // The startY for drawing is the original, non-overlapped startY
+                            finalPaddedCtx.drawImage(payload.upscaledStrip, 0, (workerId * stripHeight) * 4);
                             worker.removeEventListener('message', listener);
                             resolve();
                         } else if (type === 'error') {
@@ -383,7 +410,12 @@ export default function App() {
 
                     worker.postMessage({
                         type: 'upscaleStrip',
-                        payload: { stripBitmap: stripBitmap, startY: startY },
+                        payload: { 
+                            stripBitmap: stripBitmap, 
+                            startY: workerId * stripHeight, // Send original startY for stitching
+                            topOverlap: topOverlap,
+                            bottomOverlap: bottomOverlap
+                        },
                         workerId: workerId
                     }, [stripBitmap]);
                 })
@@ -397,6 +429,8 @@ export default function App() {
                 finalCanvas.height = originalBitmap.height * 4;
                 const finalCtx = finalCanvas.getContext('2d');
                 finalCtx.drawImage(finalPaddedCanvas, 0, 0, finalCanvas.width, finalCanvas.height, 0, 0, finalCanvas.width, finalCanvas.height);
+                
+                finalPaddedCanvas = null;
 
                 const link = document.createElement('a');
                 const fileExtension = format.toLowerCase();
