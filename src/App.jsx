@@ -180,131 +180,133 @@ export default function App() {
                 }
 
                 if (type === 'upscaleStrip') {
-                    try {
-                        if (!session) throw new Error('Session not ready.');
-                        const { stripBitmap, stripInfo } = payload;
-                        
-                        const TILE_SIZE = 64;
-                        const TILE_OVERLAP = 8;
-                        const STEP = TILE_SIZE - TILE_OVERLAP;
-                        const SCALE = 4;
-                        
-                        // Create output canvas for the upscaled strip
-                        const outputCanvas = new OffscreenCanvas(stripBitmap.width * SCALE, stripBitmap.height * SCALE);
-                        const outputCtx = outputCanvas.getContext('2d');
-                        
-                        // Process tiles within the strip
-                        for (let y = 0; y < stripBitmap.height; y += STEP) {
-                            // Adjust for last tile to ensure full coverage
-                            if (y + TILE_SIZE > stripBitmap.height && y > 0) {
-                                y = stripBitmap.height - TILE_SIZE;
-                            }
-                            
-                            for (let x = 0; x < stripBitmap.width; x += STEP) {
-                                // Adjust for last tile to ensure full coverage
-                                if (x + TILE_SIZE > stripBitmap.width && x > 0) {
-                                    x = stripBitmap.width - TILE_SIZE;
-                                }
+  try {
+    if (!session) throw new Error('Session not ready.');
+    const { stripBitmap, stripInfo } = payload;
 
-                                // Extract tile
-                                const tileCanvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
-                                const tileCtx = tileCanvas.getContext('2d');
-                                tileCtx.drawImage(stripBitmap, x, y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
-                                
-                                // Prepare input tensor
-                                const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
-                                const { data, width, height } = tileImageData;
-                                const float32Data = new Float32Array(3 * width * height);
-                                for (let i = 0; i < width * height; i++) {
-                                    float32Data[i] = data[i * 4] / 255.0;
-                                    float32Data[i + width * height] = data[i * 4 + 1] / 255.0;
-                                    float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0;
-                                }
-                                
-                                // Run inference
-                                const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
-                                const feeds = { [session.inputNames[0]]: inputTensor };
-                                const results = await session.run(feeds);
-                                const outputTensor = results[session.outputNames[0]];
+    const TILE_SIZE = 128;
+    const TILE_OVERLAP = 32;
+    const STEP = TILE_SIZE - TILE_OVERLAP;
+    const SCALE = 4;
 
-                                // Convert output to image
-                                const upscaledTileCanvas = new OffscreenCanvas(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
-                                const upscaledTileCtx = upscaledTileCanvas.getContext('2d');
-                                const upscaledImageData = upscaledTileCtx.createImageData(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
-                                const upscaledData = upscaledImageData.data;
-                                const outputData = outputTensor.data;
-                                const tileArea = TILE_SIZE * SCALE * TILE_SIZE * SCALE;
+    // Create output canvas for the upscaled strip
+    const outputCanvas = new OffscreenCanvas(stripBitmap.width * SCALE, stripBitmap.height * SCALE);
+    const outputCtx = outputCanvas.getContext('2d');
 
-                                for (let ty = 0; ty < TILE_SIZE * SCALE; ty++) {
-                                    for (let tx = 0; tx < TILE_SIZE * SCALE; tx++) {
-                                        const pos = (ty * TILE_SIZE * SCALE + tx);
-                                        const r = Math.min(255, Math.max(0, outputData[pos] * 255));
-                                        const g = Math.min(255, Math.max(0, outputData[pos + tileArea] * 255));
-                                        const b = Math.min(255, Math.max(0, outputData[pos + 2 * tileArea] * 255));
-                                        const idx = pos * 4;
-                                        upscaledData[idx] = r; upscaledData[idx + 1] = g; upscaledData[idx + 2] = b; upscaledData[idx + 3] = 255;
-                                    }
-                                }
-                                upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
-                                
-                                // Calculate seamless stitching coordinates
-                                const isFirstCol = x === 0;
-                                const isFirstRow = y === 0;
-                                const isLastCol = x + TILE_SIZE >= stripBitmap.width;
-                                const isLastRow = y + TILE_SIZE >= stripBitmap.height;
-                                
-                                // Source coordinates (skip overlap areas)
-                                const srcX = isFirstCol ? 0 : (TILE_OVERLAP / 2) * SCALE;
-                                const srcY = isFirstRow ? 0 : (TILE_OVERLAP / 2) * SCALE;
-                                
-                                // Destination coordinates
-                                const destX = isFirstCol ? 0 : (x + TILE_OVERLAP / 2) * SCALE;
-                                const destY = isFirstRow ? 0 : (y + TILE_OVERLAP / 2) * SCALE;
-                                
-                                // Dimensions (exclude overlap areas)
-                                const tileWidth = (isFirstCol ? TILE_SIZE - TILE_OVERLAP / 2 : 
-                                                   isLastCol ? TILE_SIZE - TILE_OVERLAP / 2 : STEP) * SCALE;
-                                const tileHeight = (isFirstRow ? TILE_SIZE - TILE_OVERLAP / 2 : 
-                                                    isLastRow ? TILE_SIZE - TILE_OVERLAP / 2 : STEP) * SCALE;
-                                
-                                outputCtx.drawImage(upscaledTileCanvas, srcX, srcY, tileWidth, tileHeight, destX, destY, tileWidth, tileHeight);
+    for (let y = 0; y < stripBitmap.height; y += STEP) {
+      if (y + TILE_SIZE > stripBitmap.height && y > 0) {
+        y = stripBitmap.height - TILE_SIZE;
+      }
 
-                                // --- THIS IS THE FIX ---
-                                // The workerId must be included in the progress report
-                                self.postMessage({ type: 'tilingProgress', workerId: workerId });
-                                
-                                // Break if we've reached the end
-                                if (x + TILE_SIZE >= stripBitmap.width) break;
-                            }
-                            if (y + TILE_SIZE >= stripBitmap.height) break;
-                        }
+      for (let x = 0; x < stripBitmap.width; x += STEP) {
+        if (x + TILE_SIZE > stripBitmap.width && x > 0) {
+          x = stripBitmap.width - TILE_SIZE;
+        }
 
-                        // Create final cropped strip (remove padding overlaps)
-                        const finalWidth = stripInfo.originalWidth * SCALE;
-                        const finalHeight = stripInfo.originalHeight * SCALE;
-                        const croppedCanvas = new OffscreenCanvas(finalWidth, finalHeight);
-                        const croppedCtx = croppedCanvas.getContext('2d');
-                        
-                        // Calculate crop coordinates
-                        const cropX = stripInfo.paddingLeft * SCALE;
-                        const cropY = stripInfo.paddingTop * SCALE;
-                        
-                        croppedCtx.drawImage(outputCanvas, cropX, cropY, finalWidth, finalHeight, 0, 0, finalWidth, finalHeight);
-                        
-                        const finalStripBitmap = croppedCanvas.transferToImageBitmap();
-                        self.postMessage({ 
-                            type: 'upscaleComplete', 
-                            payload: { 
-                                upscaledStrip: finalStripBitmap, 
-                                stripInfo: stripInfo
-                            }, 
-                            workerId 
-                        }, [finalStripBitmap]);
-                        
-                    } catch (error) {
-                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message, stack: error.stack }, workerId });
-                    }
-                }
+        // Extract tile
+        const tileCanvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
+        const tileCtx = tileCanvas.getContext('2d');
+        tileCtx.drawImage(stripBitmap, x, y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
+
+        // Prepare input tensor
+        const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
+        const { data, width, height } = tileImageData;
+        const float32Data = new Float32Array(3 * width * height);
+        for (let i = 0; i < width * height; i++) {
+          float32Data[i] = data[i * 4] / 255.0;
+          float32Data[i + width * height] = data[i * 4 + 1] / 255.0;
+          float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0;
+        }
+
+        const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
+        const feeds = { [session.inputNames[0]]: inputTensor };
+        const results = await session.run(feeds);
+        const outputTensor = results[session.outputNames[0]];
+
+        // Convert model output into upscaled tile image
+        const upscaledTileCanvas = new OffscreenCanvas(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
+        const upscaledTileCtx = upscaledTileCanvas.getContext('2d');
+        const upscaledImageData = upscaledTileCtx.createImageData(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
+        const upscaledData = upscaledImageData.data;
+        const outputData = outputTensor.data;
+        const tileArea = TILE_SIZE * SCALE * TILE_SIZE * SCALE;
+
+        for (let ty = 0; ty < TILE_SIZE * SCALE; ty++) {
+          for (let tx = 0; tx < TILE_SIZE * SCALE; tx++) {
+            const pos = ty * TILE_SIZE * SCALE + tx;
+            const r = Math.min(255, Math.max(0, outputData[pos] * 255));
+            const g = Math.min(255, Math.max(0, outputData[pos + tileArea] * 255));
+            const b = Math.min(255, Math.max(0, outputData[pos + 2 * tileArea] * 255));
+            const idx = pos * 4;
+            upscaledData[idx] = r;
+            upscaledData[idx + 1] = g;
+            upscaledData[idx + 2] = b;
+            upscaledData[idx + 3] = 255;
+          }
+        }
+        upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
+
+        // --- Alpha blending mask for overlaps ---
+        const tileWidth = TILE_SIZE * SCALE;
+        const tileHeight = TILE_SIZE * SCALE;
+        const maskCanvas = new OffscreenCanvas(tileWidth, tileHeight);
+        const maskCtx = maskCanvas.getContext('2d');
+        maskCtx.fillStyle = "white";
+        maskCtx.fillRect(0, 0, tileWidth, tileHeight);
+
+        if (x > 0) {
+          const grad = maskCtx.createLinearGradient(0, 0, TILE_OVERLAP * SCALE, 0);
+          grad.addColorStop(0, "transparent");
+          grad.addColorStop(1, "white");
+          maskCtx.fillStyle = grad;
+          maskCtx.fillRect(0, 0, TILE_OVERLAP * SCALE, tileHeight);
+        }
+
+        if (y > 0) {
+          const grad = maskCtx.createLinearGradient(0, 0, 0, TILE_OVERLAP * SCALE);
+          grad.addColorStop(0, "transparent");
+          grad.addColorStop(1, "white");
+          maskCtx.fillStyle = grad;
+          maskCtx.fillRect(0, 0, tileWidth, TILE_OVERLAP * SCALE);
+        }
+
+        const destX = x * SCALE;
+        const destY = y * SCALE;
+
+        outputCtx.save();
+        outputCtx.globalCompositeOperation = "destination-over";
+        outputCtx.drawImage(upscaledTileCanvas, destX, destY);
+        outputCtx.globalCompositeOperation = "destination-in";
+        outputCtx.drawImage(maskCanvas, destX, destY);
+        outputCtx.restore();
+
+        self.postMessage({ type: 'tilingProgress', workerId });
+        if (x + TILE_SIZE >= stripBitmap.width) break;
+      }
+      if (y + TILE_SIZE >= stripBitmap.height) break;
+    }
+
+    // Crop to original size
+    const finalWidth = stripInfo.originalWidth * SCALE;
+    const finalHeight = stripInfo.originalHeight * SCALE;
+    const croppedCanvas = new OffscreenCanvas(finalWidth, finalHeight);
+    const croppedCtx = croppedCanvas.getContext('2d');
+    const cropX = stripInfo.paddingLeft * SCALE;
+    const cropY = stripInfo.paddingTop * SCALE;
+    croppedCtx.drawImage(outputCanvas, cropX, cropY, finalWidth, finalHeight, 0, 0, finalWidth, finalHeight);
+
+    const finalStripBitmap = croppedCanvas.transferToImageBitmap();
+    self.postMessage({
+      type: 'upscaleComplete',
+      payload: { upscaledStrip: finalStripBitmap, stripInfo },
+      workerId
+    }, [finalStripBitmap]);
+
+  } catch (error) {
+    self.postMessage({ type: 'error', payload: { name: error.name, message: error.message, stack: error.stack }, workerId });
+  }
+}
+
             };
         `;
         const blob = new Blob([workerCode], { type: 'application/javascript' });
