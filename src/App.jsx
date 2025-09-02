@@ -191,9 +191,14 @@ export default function App() {
                         
                         const finalStrip = new OffscreenCanvas(stripBitmap.width * SCALE, stripBitmap.height * SCALE);
                         const finalCtx = finalStrip.getContext('2d');
+                        let stitchedWidth = 0;
 
-                        for (let y = 0; y <= stripBitmap.height - TILE_SIZE; y += STEP) {
-                            for (let x = 0; x <= stripBitmap.width - TILE_SIZE; x += STEP) {
+                        for (let x = 0; x < stripBitmap.width; x += STEP) {
+                             if (x + TILE_SIZE > stripBitmap.width) x = stripBitmap.width - TILE_SIZE;
+                             let stitchedHeight = 0;
+                             for (let y = 0; y < stripBitmap.height; y += STEP) {
+                                if (y + TILE_SIZE > stripBitmap.height) y = stripBitmap.height - TILE_SIZE;
+
                                 const tileCanvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
                                 const tileCtx = tileCanvas.getContext('2d');
                                 tileCtx.drawImage(stripBitmap, x, y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
@@ -231,21 +236,25 @@ export default function App() {
                                 }
                                 upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
                                 
-                                // --- TILE OVERLAP LOGIC ---
-                                // Define source (from upscaled tile) and destination (on final strip) crop windows
-                                const sX = (x === 0) ? 0 : TILE_OVERLAP / 2 * SCALE;
-                                const sY = (y === 0) ? 0 : TILE_OVERLAP / 2 * SCALE;
-                                const sWidth = (x === stripBitmap.width - TILE_SIZE) ? TILE_SIZE * SCALE - sX : TILE_SIZE * SCALE - TILE_OVERLAP * SCALE;
-                                const sHeight = (y === stripBitmap.height - TILE_SIZE) ? TILE_SIZE * SCALE - sY : TILE_SIZE * SCALE - TILE_OVERLAP * SCALE;
+                                // --- PRECISE STITCHING LOGIC ---
+                                const sX = x === 0 ? 0 : (TILE_OVERLAP / 2) * SCALE;
+                                const sY = y === 0 ? 0 : (TILE_OVERLAP / 2) * SCALE;
                                 
-                                const dX = (x + TILE_OVERLAP / 2) * SCALE;
-                                const dY = (y + TILE_OVERLAP / 2) * SCALE;
+                                const sWidth = (x === stripBitmap.width - TILE_SIZE) ? (TILE_SIZE * SCALE) - sX : (STEP * SCALE);
+                                const sHeight = (y === stripBitmap.height - TILE_SIZE) ? (TILE_SIZE * SCALE) - sY : (STEP * SCALE);
+
+                                const dX = stitchedWidth;
+                                const dY = stitchedHeight;
                                 const dWidth = sWidth;
                                 const dHeight = sHeight;
 
                                 finalCtx.drawImage(upscaledTileCanvas, sX, sY, sWidth, sHeight, dX, dY, dWidth, dHeight);
-                                self.postMessage({ type: 'tilingProgress', workerId });
-                            }
+                                stitchedHeight += dHeight;
+                                if (y + TILE_SIZE >= stripBitmap.height) break;
+                             }
+                             stitchedWidth += (x === 0 ? (TILE_SIZE - TILE_OVERLAP / 2) * SCALE : STEP * SCALE);
+                             self.postMessage({ type: 'tilingProgress' });
+                             if (x + TILE_SIZE >= stripBitmap.width) break;
                         }
 
                         const croppedWidth = finalStrip.width;
@@ -338,10 +347,9 @@ export default function App() {
             const file = uploadedFiles[i];
             const originalBitmap = await createImageBitmap(file);
 
-            // --- PADDING LOGIC ADJUSTED FOR TILE OVERLAP ---
             const TILE_SIZE = 64;
             const TILE_OVERLAP = 8;
-            const STEP = TILE_SIZE - TILE_OVERLAP; // The effective size of a tile after overlap
+            const STEP = TILE_SIZE - TILE_OVERLAP;
             const paddedWidth = Math.ceil(originalBitmap.width / STEP) * STEP + TILE_OVERLAP;
             const paddedHeight = Math.ceil(originalBitmap.height / STEP) * STEP + TILE_OVERLAP;
 
@@ -379,7 +387,7 @@ export default function App() {
                         currentStripHeight += bottomOverlap;
                     }
 
-                    if (startY >= paddedHeight || currentStripHeight <= 0) {
+                    if (startY >= paddedHeight || currentStripHeight <= TILE_SIZE) {
                         resolve(); return;
                     }
                     
