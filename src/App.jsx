@@ -154,6 +154,8 @@ export default function App() {
     const workerPool = useRef([]);
     const progressRef = useRef(0);
     const modelLoaded = useRef(null);
+    // --- KEY CHANGE ---: Ref to store the downloaded model data
+    const modelBuffer = useRef(null);
 
     // Effect to set up and tear down the web worker pool
     useEffect(() => {
@@ -168,13 +170,10 @@ export default function App() {
 
                 if (type === 'loadModel') {
                     try {
-                        const { modelUrl } = payload;
-                        if (!session || session.modelUrl !== modelUrl) { 
-                            const response = await fetch(modelUrl);
-                            if (!response.ok) throw new Error(\`HTTP \${response.status}: \${response.statusText}\`);
-                            const modelBuffer = await response.arrayBuffer();
+                        // --- KEY CHANGE ---: The worker now receives the raw model data, it does NOT fetch.
+                        const { modelBuffer } = payload;
+                        if (!session) { 
                             session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
-                            session.modelUrl = modelUrl;
                         }
                         self.postMessage({ type: 'modelLoaded', workerId });
                     } catch (error) {
@@ -185,12 +184,10 @@ export default function App() {
                 if (type === 'upscaleStrip') {
                     try {
                         if (!session) throw new Error('Session not ready.');
-                        // Worker now receives a self-contained stripBitmap, not the whole image
                         const { stripBitmap, startY } = payload;
                         
                         const TILE_SIZE = 64;
                         const SCALE = 4;
-                        // The final strip is based on the stripBitmap's dimensions
                         const finalStrip = new OffscreenCanvas(stripBitmap.width * SCALE, stripBitmap.height * SCALE);
                         const finalCtx = finalStrip.getContext('2d');
 
@@ -198,8 +195,6 @@ export default function App() {
                             for (let x = 0; x < stripBitmap.width; x += TILE_SIZE) {
                                 const tileCanvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
                                 const tileCtx = tileCanvas.getContext('2d');
-                                
-                                // Logic is now simpler: just draw from the local stripBitmap
                                 tileCtx.drawImage(stripBitmap, x, y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
                                 
                                 const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
@@ -244,7 +239,6 @@ export default function App() {
                             }
                         }
                         const finalStripBitmap = finalStrip.transferToImageBitmap();
-                        // Send back the upscaled strip AND its original startY for stitching
                         self.postMessage({ type: 'upscaleComplete', payload: { upscaledStrip: finalStripBitmap, startY: startY * SCALE }, workerId }, [finalStripBitmap]);
                     } catch (error) {
                          self.postMessage({ type: 'error', payload: { name: error.name, message: error.message, stack: error.stack }, workerId });
@@ -289,29 +283,37 @@ export default function App() {
         setModelLoadingState({ isLoading: true, progress: 0 });
 
         if (model.id !== modelLoaded.current) {
-            const modelReadyPromises = workerPool.current.map((worker, i) =>
-                new Promise((resolve, reject) => {
-                    const listener = (event) => {
-                        const { type, workerId, payload } = event.data;
-                        if (workerId !== i) return;
-
-                        if (type === 'modelLoaded') {
-                            worker.removeEventListener('message', listener);
-                            resolve();
-                        } else if (type === 'error') {
-                            worker.removeEventListener('message', listener);
-                            reject(new Error(payload.message));
-                        }
-                    };
-                    worker.addEventListener('message', listener);
-                    worker.postMessage({ type: 'loadModel', payload: { modelUrl: model.url }, workerId: i });
-                })
-            );
-
             try {
+                // --- KEY CHANGE ---: Download the model ONCE here on the main thread.
+                setProcessingStatus('Downloading model...');
+                const response = await fetch(model.url);
+                if (!response.ok) throw new Error(`Failed to download model: ${response.statusText}`);
+                modelBuffer.current = await response.arrayBuffer();
+                setProcessingStatus('Initializing workers...');
+
+                const modelReadyPromises = workerPool.current.map((worker, i) =>
+                    new Promise((resolve, reject) => {
+                        const listener = (event) => {
+                            const { type, workerId, payload } = event.data;
+                            if (workerId !== i) return;
+
+                            if (type === 'modelLoaded') {
+                                worker.removeEventListener('message', listener);
+                                resolve();
+                            } else if (type === 'error') {
+                                worker.removeEventListener('message', listener);
+                                reject(new Error(payload.message));
+                            }
+                        };
+                        worker.addEventListener('message', listener);
+                        // Send the downloaded buffer to the worker. A copy is made automatically.
+                        worker.postMessage({ type: 'loadModel', payload: { modelBuffer: modelBuffer.current }, workerId: i });
+                    })
+                );
+
                 await Promise.all(modelReadyPromises);
                 modelLoaded.current = model.id;
-                setModelLoadingState({ isLoading: false, progress: 100 });
+                
             } catch (error) {
                 console.error('Model loading failed:', error);
                 alert(`Failed to load model: ${error.message}`)
@@ -319,9 +321,9 @@ export default function App() {
                 setModelLoadingState({ isLoading: false, progress: 0 });
                 return;
             }
-        } else {
-            setModelLoadingState({ isLoading: false, progress: 100 });
         }
+        
+        setModelLoadingState({ isLoading: false, progress: 100 });
 
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
@@ -347,7 +349,7 @@ export default function App() {
             const finalPaddedCtx = finalPaddedCanvas.getContext('2d');
 
             const upscalePromises = workerPool.current.map((worker, workerId) =>
-                new Promise(async (resolve, reject) => { // Made this async for await
+                new Promise(async (resolve, reject) => {
                     const startY = workerId * stripHeight;
                     if (startY >= paddedHeight) {
                         resolve();
@@ -355,18 +357,11 @@ export default function App() {
                     }
                     const currentStripHeight = Math.min(stripHeight, paddedHeight - startY);
 
-                    // --- MEMORY FIX STARTS HERE ---
-                    // 1. Create a small canvas for just the strip
                     const stripCanvas = new OffscreenCanvas(paddedWidth, currentStripHeight);
                     const stripCtx = stripCanvas.getContext('2d');
-                    
-                    // 2. Draw only the strip from the full padded image
                     stripCtx.drawImage(paddedCanvas, 0, startY, paddedWidth, currentStripHeight, 0, 0, paddedWidth, currentStripHeight);
-                    
-                    // 3. Create a bitmap from the strip canvas
                     const stripBitmap = await stripCanvas.transferToImageBitmap();
-                    // --- MEMORY FIX ENDS HERE ---
-
+                    
                     const listener = (event) => {
                         const { type, payload, workerId: msgWorkerId } = event.data;
                         if (msgWorkerId !== workerId) return;
@@ -386,7 +381,6 @@ export default function App() {
                     };
                     worker.addEventListener('message', listener);
 
-                    // 4. Send ONLY the small strip to the worker and transfer it for performance
                     worker.postMessage({
                         type: 'upscaleStrip',
                         payload: { stripBitmap: stripBitmap, startY: startY },
@@ -440,10 +434,12 @@ export default function App() {
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
                     <div className="bg-[#1F2937] rounded-3xl p-8 text-center shadow-lg">
                         <div className="animate-spin w-8 h-8 border-2 border-[#7B33F7] border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="text-white text-lg">{modelLoadingState.isLoading ? `Loading model...` : processingStatus}</p>
+                        <p className="text-white text-lg">{modelLoadingState.isLoading ? processingStatus : processingStatus}</p>
                     </div>
                 </div>
             )}
         </div>
+    );
+}
     );
 }
