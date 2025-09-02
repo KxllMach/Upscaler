@@ -191,13 +191,14 @@ export default function App() {
                         
                         const finalStrip = new OffscreenCanvas(stripBitmap.width * SCALE, stripBitmap.height * SCALE);
                         const finalCtx = finalStrip.getContext('2d');
-                        let stitchedWidth = 0;
-
-                        for (let x = 0; x < stripBitmap.width; x += STEP) {
-                             if (x + TILE_SIZE > stripBitmap.width) x = stripBitmap.width - TILE_SIZE;
-                             let stitchedHeight = 0;
-                             for (let y = 0; y < stripBitmap.height; y += STEP) {
-                                if (y + TILE_SIZE > stripBitmap.height) y = stripBitmap.height - TILE_SIZE;
+                        
+                        let stitchedHeight = 0;
+                        for (let y = 0; y < stripBitmap.height; y += STEP) {
+                            if (y + TILE_SIZE > stripBitmap.height) y = stripBitmap.height - TILE_SIZE;
+                            
+                            let stitchedWidth = 0;
+                            for (let x = 0; x < stripBitmap.width; x += STEP) {
+                                if (x + TILE_SIZE > stripBitmap.width) x = stripBitmap.width - TILE_SIZE;
 
                                 const tileCanvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
                                 const tileCtx = tileCanvas.getContext('2d');
@@ -236,25 +237,21 @@ export default function App() {
                                 }
                                 upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
                                 
-                                // --- PRECISE STITCHING LOGIC ---
-                                const sX = x === 0 ? 0 : (TILE_OVERLAP / 2) * SCALE;
-                                const sY = y === 0 ? 0 : (TILE_OVERLAP / 2) * SCALE;
+                                // --- CORRECTED STITCHING LOGIC ---
+                                const sX = (x === 0) ? 0 : (TILE_OVERLAP / 2) * SCALE;
+                                const sY = (y === 0) ? 0 : (TILE_OVERLAP / 2) * SCALE;
                                 
-                                const sWidth = (x === stripBitmap.width - TILE_SIZE) ? (TILE_SIZE * SCALE) - sX : (STEP * SCALE);
-                                const sHeight = (y === stripBitmap.height - TILE_SIZE) ? (TILE_SIZE * SCALE) - sY : (STEP * SCALE);
+                                const sWidth = TILE_SIZE * SCALE - (x === 0 ? 1 : 2) * (TILE_OVERLAP / 2) * SCALE - (x + TILE_SIZE >= stripBitmap.width ? 0 : TILE_OVERLAP / 2 * SCALE);
+                                const sHeight = TILE_SIZE * SCALE - (y === 0 ? 1 : 2) * (TILE_OVERLAP / 2) * SCALE - (y + TILE_SIZE >= stripBitmap.height ? 0 : TILE_OVERLAP / 2 * SCALE);
+                                
+                                finalCtx.drawImage(upscaledTileCanvas, sX, sY, sWidth, sHeight, stitchedWidth, stitchedHeight, sWidth, sHeight);
 
-                                const dX = stitchedWidth;
-                                const dY = stitchedHeight;
-                                const dWidth = sWidth;
-                                const dHeight = sHeight;
-
-                                finalCtx.drawImage(upscaledTileCanvas, sX, sY, sWidth, sHeight, dX, dY, dWidth, dHeight);
-                                stitchedHeight += dHeight;
-                                if (y + TILE_SIZE >= stripBitmap.height) break;
-                             }
-                             stitchedWidth += (x === 0 ? (TILE_SIZE - TILE_OVERLAP / 2) * SCALE : STEP * SCALE);
-                             self.postMessage({ type: 'tilingProgress' });
-                             if (x + TILE_SIZE >= stripBitmap.width) break;
+                                stitchedWidth += sWidth;
+                                self.postMessage({ type: 'tilingProgress' });
+                                if (x + TILE_SIZE >= stripBitmap.width) break;
+                            }
+                            stitchedHeight += (y === 0 ? TILE_SIZE - TILE_OVERLAP / 2 : STEP) * SCALE;
+                             if (y + TILE_SIZE >= stripBitmap.height) break;
                         }
 
                         const croppedWidth = finalStrip.width;
@@ -387,7 +384,7 @@ export default function App() {
                         currentStripHeight += bottomOverlap;
                     }
 
-                    if (startY >= paddedHeight || currentStripHeight <= TILE_SIZE) {
+                    if (startY >= paddedHeight || currentStripHeight < TILE_SIZE) {
                         resolve(); return;
                     }
                     
