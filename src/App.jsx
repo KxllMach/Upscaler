@@ -185,7 +185,7 @@ export default function App() {
                 if (type === 'upscaleStrip') {
                     try {
                         if (!session) throw new Error('Session not ready.');
-                        const { paddedBitmap, startY, stripHeight, originalWidth } = payload;
+                        const { paddedBitmap, startY, stripHeight } = payload;
                         
                         const TILE_SIZE = 64;
                         const SCALE = 4;
@@ -196,7 +196,8 @@ export default function App() {
                             for (let x = 0; x < paddedBitmap.width; x += TILE_SIZE) {
                                 const tileCanvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
                                 const tileCtx = tileCanvas.getContext('2d');
-                                tileCtx.drawImage(paddedBitmap, x, y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
+                                // Draw from the correct strip starting position
+                                tileCtx.drawImage(paddedBitmap, x, startY + y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
                                 const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
                                 
                                 const { data, width, height } = tileImageData;
@@ -216,14 +217,20 @@ export default function App() {
                                 const upscaledTileCtx = upscaledTileCanvas.getContext('2d');
                                 const upscaledImageData = upscaledTileCtx.createImageData(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
                                 const upscaledData = upscaledImageData.data;
+                                const outputData = outputTensor.data;
+                                const tileArea = TILE_SIZE * SCALE * TILE_SIZE * SCALE;
+
                                 for (let ty = 0; ty < TILE_SIZE * SCALE; ty++) {
                                     for (let tx = 0; tx < TILE_SIZE * SCALE; tx++) {
                                         const pos = (ty * TILE_SIZE * SCALE + tx);
-                                        const r = Math.min(255, Math.max(0, outputTensor.data[pos] * 255));
-                                        const g = Math.min(255, Math.max(0, outputTensor.data[pos + (TILE_SIZE * SCALE) ** 2] * 255));
-                                        const b = Math.min(255, Math.max(0, outputTensor.data[pos + 2 * (TILE_SIZE * SCALE) ** 2] * 255));
+                                        const r = Math.min(255, Math.max(0, outputData[pos] * 255));
+                                        const g = Math.min(255, Math.max(0, outputData[pos + tileArea] * 255));
+                                        const b = Math.min(255, Math.max(0, outputData[pos + 2 * tileArea] * 255));
                                         const idx = pos * 4;
-                                        upscaledData[idx] = r; upscaledData[idx + 1] = g; upscaledData[idx + 2] = b; upscaledData[idx + 3] = 255;
+                                        upscaledData[idx] = r; 
+                                        upscaledData[idx + 1] = g; 
+                                        upscaledData[idx + 2] = b; 
+                                        upscaledData[idx + 3] = 255;
                                     }
                                 }
                                 upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
@@ -232,10 +239,10 @@ export default function App() {
                                 self.postMessage({ type: 'tilingProgress', workerId });
                             }
                         }
-                        const finalStripBitmap = await finalStrip.transferToImageBitmap();
-                        self.postMessage({ type: 'upscaleComplete', upscaledStrip: finalStripBitmap, startY: startY * SCALE, workerId }, [finalStripBitmap]);
+                        const finalStripBitmap = finalStrip.transferToImageBitmap();
+                        self.postMessage({ type: 'upscaleComplete', payload: { upscaledStrip: finalStripBitmap, startY: startY * SCALE }, workerId }, [finalStripBitmap]);
                     } catch (error) {
-                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message }, workerId });
+                         self.postMessage({ type: 'error', payload: { name: error.name, message: error.message, stack: error.stack }, workerId });
                     }
                 }
             };
@@ -325,50 +332,55 @@ export default function App() {
             const paddedBitmap = await paddedCanvas.transferToImageBitmap();
 
             const numWorkers = workerPool.current.length;
-            const stripHeight = Math.ceil(paddedBitmap.height / numWorkers);
+            const stripHeight = Math.ceil(paddedHeight / numWorkers);
 
-            const totalTiles = Math.ceil(paddedBitmap.width / TILE_SIZE) * Math.ceil(paddedBitmap.height / TILE_SIZE);
+            const totalTiles = Math.ceil(paddedWidth / TILE_SIZE) * Math.ceil(paddedHeight / TILE_SIZE);
             progressRef.current = 0;
             
             const finalPaddedCanvas = document.createElement('canvas');
-            finalPaddedCanvas.width = paddedBitmap.width * 4;
-            finalPaddedCanvas.height = paddedBitmap.height * 4;
+            finalPaddedCanvas.width = paddedWidth * 4;
+            finalPaddedCanvas.height = paddedHeight * 4;
             const finalPaddedCtx = finalPaddedCanvas.getContext('2d');
 
             const upscalePromises = workerPool.current.map((worker, workerId) => 
                 new Promise((resolve, reject) => {
                     const startY = workerId * stripHeight;
-                    if (startY >= paddedBitmap.height) {
+                    if (startY >= paddedHeight) {
                         resolve();
                         return;
                     }
-                    const currentStripHeight = Math.min(stripHeight, paddedBitmap.height - startY);
+                    const currentStripHeight = Math.min(stripHeight, paddedHeight - startY);
                     
                     const listener = (event) => {
-                        const { type, upscaledStrip, startY: stripStartY, payload, workerId: msgWorkerId } = event.data;
+                        const { type, payload, workerId: msgWorkerId } = event.data;
                         if(msgWorkerId !== workerId) return;
 
                         if (type === 'tilingProgress') {
                             progressRef.current++;
                             setProcessingStatus(`Processing... ${((progressRef.current / totalTiles) * 100).toFixed(0)}%`);
                         } else if (type === 'upscaleComplete') {
-                            finalPaddedCtx.drawImage(upscaledStrip, 0, stripStartY);
+                            finalPaddedCtx.drawImage(payload.upscaledStrip, 0, payload.startY);
                             worker.removeEventListener('message', listener);
                             resolve();
                         } else if (type === 'error') {
                             worker.removeEventListener('message', listener);
+                            console.error('Error from worker:', payload);
                             reject(new Error(payload.message));
                         }
                     };
                     worker.addEventListener('message', listener);
-                    worker.postMessage({ type: 'upscaleStrip', payload: { imageBitmap: paddedBitmap, startY, stripHeight: currentStripHeight, originalWidth: paddedBitmap.width }, workerId });
+                    // This is the corrected line
+                    worker.postMessage({ 
+                        type: 'upscaleStrip', 
+                        payload: { paddedBitmap: paddedBitmap, startY: startY, stripHeight: currentStripHeight }, 
+                        workerId: workerId 
+                    }, [paddedBitmap]);
                 })
             );
 
             try {
                 await Promise.all(upscalePromises);
                 
-                // Crop the final image to remove padding
                 const finalCanvas = document.createElement('canvas');
                 finalCanvas.width = originalBitmap.width * 4;
                 finalCanvas.height = originalBitmap.height * 4;
