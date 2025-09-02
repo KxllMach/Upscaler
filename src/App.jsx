@@ -185,20 +185,22 @@ export default function App() {
                 if (type === 'upscaleStrip') {
                     try {
                         if (!session) throw new Error('Session not ready.');
-                        const { paddedBitmap, startY, stripHeight } = payload;
+                        // Worker now receives a self-contained stripBitmap, not the whole image
+                        const { stripBitmap, startY } = payload;
                         
                         const TILE_SIZE = 64;
                         const SCALE = 4;
-                        const finalStrip = new OffscreenCanvas(paddedBitmap.width * SCALE, stripHeight * SCALE);
+                        // The final strip is based on the stripBitmap's dimensions
+                        const finalStrip = new OffscreenCanvas(stripBitmap.width * SCALE, stripBitmap.height * SCALE);
                         const finalCtx = finalStrip.getContext('2d');
 
-                        for (let y = 0; y < stripHeight; y += TILE_SIZE) {
-                            for (let x = 0; x < paddedBitmap.width; x += TILE_SIZE) {
+                        for (let y = 0; y < stripBitmap.height; y += TILE_SIZE) {
+                            for (let x = 0; x < stripBitmap.width; x += TILE_SIZE) {
                                 const tileCanvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
                                 const tileCtx = tileCanvas.getContext('2d');
                                 
-                                // THIS IS A CRITICAL BUG FIX: Draw from the correct global Y position of the image
-                                tileCtx.drawImage(paddedBitmap, x, startY + y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
+                                // Logic is now simpler: just draw from the local stripBitmap
+                                tileCtx.drawImage(stripBitmap, x, y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
                                 
                                 const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
                                 
@@ -242,6 +244,7 @@ export default function App() {
                             }
                         }
                         const finalStripBitmap = finalStrip.transferToImageBitmap();
+                        // Send back the upscaled strip AND its original startY for stitching
                         self.postMessage({ type: 'upscaleComplete', payload: { upscaledStrip: finalStripBitmap, startY: startY * SCALE }, workerId }, [finalStripBitmap]);
                     } catch (error) {
                          self.postMessage({ type: 'error', payload: { name: error.name, message: error.message, stack: error.stack }, workerId });
@@ -251,7 +254,7 @@ export default function App() {
         `;
         const blob = new Blob([workerCode], { type: 'application/javascript' });
         const workerUrl = URL.createObjectURL(blob);
-        for(let i=0; i<numWorkers; i++){
+        for (let i = 0; i < numWorkers; i++) {
             workerPool.current.push(new Worker(workerUrl));
         }
 
@@ -260,7 +263,7 @@ export default function App() {
             URL.revokeObjectURL(workerUrl);
         };
     }, []);
-    
+
     useEffect(() => {
         const fontLink = document.createElement('link');
         fontLink.href = "https://fonts.googleapis.com/css2?family=General+Sans:ital,wght@0,400;0,700&family=Space+Grotesk:wght@400;500;700&display=swap";
@@ -269,9 +272,9 @@ export default function App() {
         const styleTag = document.createElement('style');
         styleTag.innerHTML = `body { font-family: 'Space Grotesk', sans-serif; }`;
         document.head.appendChild(styleTag);
-        return () => { 
-            if (document.head.contains(fontLink)) document.head.removeChild(fontLink); 
-            if (document.head.contains(styleTag)) document.head.removeChild(styleTag); 
+        return () => {
+            if (document.head.contains(fontLink)) document.head.removeChild(fontLink);
+            if (document.head.contains(styleTag)) document.head.removeChild(styleTag);
         };
     }, []);
 
@@ -280,17 +283,17 @@ export default function App() {
 
     const handleUpscale = async ({ model, format }) => {
         if (uploadedFiles.length === 0 || workerPool.current.length === 0) return;
-        
+
         setIsProcessing(true);
         setProcessingStatus('Loading AI model...');
         setModelLoadingState({ isLoading: true, progress: 0 });
 
-        if(model.id !== modelLoaded.current) {
-            const modelReadyPromises = workerPool.current.map((worker, i) => 
+        if (model.id !== modelLoaded.current) {
+            const modelReadyPromises = workerPool.current.map((worker, i) =>
                 new Promise((resolve, reject) => {
                     const listener = (event) => {
-                        const {type, workerId, payload} = event.data;
-                        if(workerId !== i) return;
+                        const { type, workerId, payload } = event.data;
+                        if (workerId !== i) return;
 
                         if (type === 'modelLoaded') {
                             worker.removeEventListener('message', listener);
@@ -304,7 +307,7 @@ export default function App() {
                     worker.postMessage({ type: 'loadModel', payload: { modelUrl: model.url }, workerId: i });
                 })
             );
-            
+
             try {
                 await Promise.all(modelReadyPromises);
                 modelLoaded.current = model.id;
@@ -313,17 +316,17 @@ export default function App() {
                 console.error('Model loading failed:', error);
                 alert(`Failed to load model: ${error.message}`)
                 setIsProcessing(false);
-                setModelLoadingState({isLoading: false, progress: 0});
-                return; 
+                setModelLoadingState({ isLoading: false, progress: 0 });
+                return;
             }
         } else {
-             setModelLoadingState({ isLoading: false, progress: 100 });
+            setModelLoadingState({ isLoading: false, progress: 100 });
         }
-        
+
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
             const originalBitmap = await createImageBitmap(file);
-            
+
             const TILE_SIZE = 64;
             const paddedWidth = Math.ceil(originalBitmap.width / TILE_SIZE) * TILE_SIZE;
             const paddedHeight = Math.ceil(originalBitmap.height / TILE_SIZE) * TILE_SIZE;
@@ -331,31 +334,42 @@ export default function App() {
             const paddedCanvas = new OffscreenCanvas(paddedWidth, paddedHeight);
             const paddedCtx = paddedCanvas.getContext('2d');
             paddedCtx.drawImage(originalBitmap, 0, 0);
-            const paddedBitmap = await paddedCanvas.transferToImageBitmap();
-
+            
             const numWorkers = workerPool.current.length;
             const stripHeight = Math.ceil(paddedHeight / numWorkers);
 
             const totalTiles = Math.ceil(paddedWidth / TILE_SIZE) * Math.ceil(paddedHeight / TILE_SIZE);
             progressRef.current = 0;
-            
+
             const finalPaddedCanvas = document.createElement('canvas');
             finalPaddedCanvas.width = paddedWidth * 4;
             finalPaddedCanvas.height = paddedHeight * 4;
             const finalPaddedCtx = finalPaddedCanvas.getContext('2d');
 
-            const upscalePromises = workerPool.current.map((worker, workerId) => 
-                new Promise((resolve, reject) => {
+            const upscalePromises = workerPool.current.map((worker, workerId) =>
+                new Promise(async (resolve, reject) => { // Made this async for await
                     const startY = workerId * stripHeight;
                     if (startY >= paddedHeight) {
                         resolve();
                         return;
                     }
                     const currentStripHeight = Math.min(stripHeight, paddedHeight - startY);
+
+                    // --- MEMORY FIX STARTS HERE ---
+                    // 1. Create a small canvas for just the strip
+                    const stripCanvas = new OffscreenCanvas(paddedWidth, currentStripHeight);
+                    const stripCtx = stripCanvas.getContext('2d');
                     
+                    // 2. Draw only the strip from the full padded image
+                    stripCtx.drawImage(paddedCanvas, 0, startY, paddedWidth, currentStripHeight, 0, 0, paddedWidth, currentStripHeight);
+                    
+                    // 3. Create a bitmap from the strip canvas
+                    const stripBitmap = await stripCanvas.transferToImageBitmap();
+                    // --- MEMORY FIX ENDS HERE ---
+
                     const listener = (event) => {
                         const { type, payload, workerId: msgWorkerId } = event.data;
-                        if(msgWorkerId !== workerId) return;
+                        if (msgWorkerId !== workerId) return;
 
                         if (type === 'tilingProgress') {
                             progressRef.current++;
@@ -371,19 +385,19 @@ export default function App() {
                         }
                     };
                     worker.addEventListener('message', listener);
-                    
-                    // THIS IS THE FIX: We remove the second argument to safely clone the bitmap for each worker.
-                    worker.postMessage({ 
-                        type: 'upscaleStrip', 
-                        payload: { paddedBitmap: paddedBitmap, startY: startY, stripHeight: currentStripHeight }, 
-                        workerId: workerId 
-                    });
+
+                    // 4. Send ONLY the small strip to the worker and transfer it for performance
+                    worker.postMessage({
+                        type: 'upscaleStrip',
+                        payload: { stripBitmap: stripBitmap, startY: startY },
+                        workerId: workerId
+                    }, [stripBitmap]);
                 })
             );
 
             try {
                 await Promise.all(upscalePromises);
-                
+
                 const finalCanvas = document.createElement('canvas');
                 finalCanvas.width = originalBitmap.width * 4;
                 finalCanvas.height = originalBitmap.height * 4;
@@ -396,7 +410,7 @@ export default function App() {
                 link.href = finalCanvas.toDataURL(`image/${fileExtension}`);
                 link.click();
             } catch (error) {
-                 console.error(`Failed to process ${file.name}:`, error);
+                console.error(`Failed to process ${file.name}:`, error);
                 alert(`Failed to process ${file.name}: ${error.message}`);
                 break;
             }
