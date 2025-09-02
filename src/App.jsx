@@ -272,9 +272,9 @@ export default function App() {
                                 self.postMessage({ type: 'tilingProgress' });
                                 
                                 // Break if we've reached the end
-                                if (isLastCol) break;
+                                if (x + TILE_SIZE >= stripBitmap.width) break;
                             }
-                            if (isLastRow) break;
+                            if (y + TILE_SIZE >= stripBitmap.height) break;
                         }
 
                         // Create final cropped strip (remove padding overlaps)
