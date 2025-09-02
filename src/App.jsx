@@ -402,6 +402,8 @@ export default function App() {
 
             const totalTiles = Math.ceil(paddedWidth / STEP) * Math.ceil(paddedHeight / STEP);
             progressRef.current = 0;
+            
+            setProcessingStatus('Processing... 0%');
 
             // Create final output canvas
             const finalCanvas = document.createElement('canvas');
