@@ -120,7 +120,7 @@ const UpscaleOptions = ({ onUpscale, disabled = false, modelLoadingState }) => {
                                 <div className="text-center">
                                     <div className="w-8 h-8 border-2 border-[#7B33F7] border-t-transparent rounded-full mx-auto mb-2 animate-spin"></div>
                                     <p className="text-[#9D9D9D] text-sm">
-                                        Loading model... {modelLoadingState.progress > 0 && modelLoadingState.progress < 100 ? `${modelLoadingState.progress.toFixed(0)}%` : ''}
+                                        Loading model...
                                     </p>
                                 </div>
                             ) : (
@@ -196,7 +196,7 @@ export default function App() {
                             for (let x = 0; x < paddedBitmap.width; x += TILE_SIZE) {
                                 const tileCanvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
                                 const tileCtx = tileCanvas.getContext('2d');
-                                tileCtx.drawImage(paddedBitmap, x, y + startY, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
+                                tileCtx.drawImage(paddedBitmap, x, y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
                                 const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
                                 
                                 const { data, width, height } = tileImageData;
