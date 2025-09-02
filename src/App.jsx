@@ -446,22 +446,24 @@ export default function App() {
                     };
                     
                     const listener = (event) => {
-                      const { type, payload, workerId: msgWorkerId } = event.data;
-                      
-                      if (type === 'tilingProgress') {
-                          // Don't filter progress updates - accept from all workers
-                          progressRef.current++;
-                          const progressPercent = Math.min(100, Math.round((progressRef.current / totalTiles) * 100));
-                          setProcessingStatus(`Processing... ${progressPercent}%`);
-                          return; // Exit early for progress updates
-                      }
-                      
-                      if (msgWorkerId !== workerId) return; // Only filter other message types
-                      
-                      if (type === 'upscaleComplete') {
-                          // completion handling
-                      }
-                  };
+                        const { type, payload, workerId: msgWorkerId } = event.data;
+                        if (msgWorkerId !== workerId) return;
+                        
+                        if (type === 'tilingProgress') {
+                            progressRef.current++;
+                            setProcessingStatus(`Processing... ${((progressRef.current / totalTiles) * 100).toFixed(0)}%`);
+                        } else if (type === 'upscaleComplete') {
+                            // Place the upscaled strip in the final canvas
+                            const finalY = payload.stripInfo.startY * 4;
+                            finalCtx.drawImage(payload.upscaledStrip, 0, finalY);
+                            worker.removeEventListener('message', listener);
+                            resolve();
+                        } else if (type === 'error') {
+                            worker.removeEventListener('message', listener);
+                            console.error('Error from worker:', payload);
+                            reject(new Error(payload.message));
+                        }
+                    };
                     
                     worker.addEventListener('message', listener);
                     worker.postMessage({
