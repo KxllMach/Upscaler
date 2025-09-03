@@ -272,8 +272,10 @@ export default function App() {
                                 const copyWidth = (TILE_SIZE - (isFirstCol ? 0 : TILE_OVERLAP / 2) - (isLastCol ? 0 : TILE_OVERLAP / 2)) * SCALE;
                                 const copyHeight = (TILE_SIZE - (isFirstRow ? 0 : TILE_OVERLAP / 2) - (isLastRow ? 0 : TILE_OVERLAP / 2)) * SCALE;
 
+                                // --- THIS IS THE FIXED LINE ---
+                                // The typo 'dy' has been corrected to 'destY'
                                 if (copyWidth > 0 && copyHeight > 0) {
-                                    outputCtx.drawImage(upscaledTileCanvas, sx, sy, copyWidth, copyHeight, destX, dy, copyWidth, copyHeight);
+                                    outputCtx.drawImage(upscaledTileCanvas, sx, sy, copyWidth, copyHeight, destX, destY, copyWidth, copyHeight);
                                 }
                                 
                                 self.postMessage({ type: 'tilingProgress', workerId: workerId });
@@ -321,16 +323,15 @@ export default function App() {
             URL.revokeObjectURL(workerUrl);
         };
     }, [OPTIMAL_TILE_SIZE, TILE_OVERLAP]);
-
-    // --- THIS IS THE FIXED useEffect HOOK ---
+    
     useEffect(() => {
         const fontLink = document.createElement('link');
         fontLink.href = "https://fonts.googleapis.com/css2?family=General+Sans:ital,wght@0,400;0,700&family=Space+Grotesk:wght@400;500;700&display=swap";
         fontLink.rel = 'stylesheet';
-        document.head.appendChild(fontLink); // Corrected this line
+        document.head.appendChild(fontLink);
         const styleTag = document.createElement('style');
         styleTag.innerHTML = `body { font-family: 'Space Grotesk', sans-serif; }`;
-        document.head.appendChild(styleTag); // Added this missing line
+        document.head.appendChild(styleTag);
         return () => {
             if (document.head.contains(fontLink)) document.head.removeChild(fontLink);
             if (document.head.contains(styleTag)) document.head.removeChild(styleTag);
@@ -519,7 +520,7 @@ export default function App() {
             <div className="w-full px-4 sm:px-8 md:px-16"><div className="h-px bg-[#374151]"></div></div>
             <HeroSection />
             <main ref={mainContentRef} className="w-full px-4 sm:px-8 md:px-16 pb-16">
-                <div className="flex flex-col xl:flex-row gap-8 xl:give-12 items-start">
+                <div className="flex flex-col xl:flex-row gap-8 xl:gap-12 items-start">
                     <div className="w-full xl:w-[60%] space-y-8">
                         <FileUpload onFilesAdded={handleFilesAdded} />
                         <FileList files={uploadedFiles} onRemoveFile={handleRemoveFile} />
