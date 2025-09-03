@@ -6,19 +6,19 @@ const AI_MODELS = [
     id: 'model.onnx',
     name: 'SwinIR',
     description: 'A powerful Transformer-based model for high-quality, general-purpose upscaling.',
-    url: '[https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/model.onnx](https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/model.onnx)'
+    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/model.onnx'
   },
   {
     id: 'RealESRGAN_x4plus_anime_4B32F.onnx',
     name: 'ESRGAN Anime',
     description: 'Specialized model for anime and cartoon images with enhanced detail preservation.',
-    url: '[https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/RealESRGAN_x4plus_anime_4B32F.onnx](https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/RealESRGAN_x4plus_anime_4B32F.onnx)'
+    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/RealESRGAN_x4plus_anime_4B32F.onnx'
   },
   {
     id: 'real_esrgan_x4_fp16.onnx',
     name: 'Lite',
     description: 'Lightweight model for quick processing with moderate quality improvements.',
-    url: '[https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/real_esrgan_x4_fp16.onnx](https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/real_esrgan_x4_fp16.onnx)'
+    url: 'https://huggingface.co/KxllMach/Upscaler-Models/resolve/main/real_esrgan_x4_fp16.onnx'
   },
 ];
 const OUTPUT_FORMATS = ['PNG', 'JPEG', 'WEBP'];
@@ -33,9 +33,7 @@ const Button = ({ children, className = '', ...props }) => (
 function getOptimalTileSize() {
     const canvas = document.createElement('canvas');
     const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
-    
     if (!gl) return 64; // Fallback
-    
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     const memoryInfo = navigator.deviceMemory || 4; // GB, fallback to 4GB
@@ -52,28 +50,20 @@ function getOptimalTileSize() {
 // --- UI Component Definitions ---
 const Navigation = ({ onGetStartedClick }) => (
     <nav className="flex w-full max-w-screen-xl mx-auto justify-between items-center px-4 sm:px-8 md:px-16 py-6">
-        <div className="font-bold text-2xl text-white italic" style={{ fontFamily: "'General Sans', sans-serif" }}>
-            SafeScale
-        </div>
+        <div className="font-bold text-2xl text-white italic" style={{ fontFamily: "'General Sans', sans-serif" }}>SafeScale</div>
         <div className="hidden md:flex items-center gap-9">
             <a href="#features" className="text-[#9D9D9D] font-medium hover:text-white">Features</a>
             <a href="#how-it-works" className="text-[#9D9D9D] font-medium hover:text-white">How it Works</a>
-            <a href="[https://www.buymeacoffee.com/Kxll](https://www.buymeacoffee.com/Kxll)" target="_blank" rel="noopener noreferrer" className="text-[#9D9D9D] font-medium hover:text-white">Buy Me a Coffee</a>
+            <a href="https://www.buymeacoffee.com/Kxll" target="_blank" rel="noopener noreferrer" className="text-[#9D9D9D] font-medium hover:text-white">Buy Me a Coffee</a>
         </div>
-        <Button onClick={onGetStartedClick} className="bg-[#7B33F7] hover:bg-purple-700 text-white font-bold text-lg px-6 py-3 rounded-xl">
-            Get Started
-        </Button>
+        <Button onClick={onGetStartedClick} className="bg-[#7B33F7] hover:bg-purple-700 text-white font-bold text-lg px-6 py-3 rounded-xl">Get Started</Button>
     </nav>
 );
 
 const HeroSection = () => (
     <div className="flex flex-col items-center text-center max-w-4xl mx-auto px-4 mt-12 mb-16">
-        <h1 className="font-bold text-4xl sm:text-5xl lg:text-6xl text-white leading-tight mb-6">
-            AI-Powered Private Image Upscaling<br />Natively on YOUR Device
-        </h1>
-        <p className="font-bold text-base text-[#9D9D9D] leading-relaxed max-w-md">
-            Upscale your images on your device's hardware. No spying, No cloud, No Stress
-        </p>
+        <h1 className="font-bold text-4xl sm:text-5xl lg:text-6xl text-white leading-tight mb-6">AI-Powered Private Image Upscaling<br />Natively on YOUR Device</h1>
+        <p className="font-bold text-base text-[#9D9D9D] leading-relaxed max-w-md">Upscale your images on your device's hardware. No spying, No cloud, No Stress</p>
     </div>
 );
 
@@ -140,9 +130,7 @@ const UpscaleOptions = ({ onUpscale, disabled = false, modelLoadingState }) => {
                             {modelLoadingState.isLoading ? (
                                 <div className="text-center">
                                     <div className="w-8 h-8 border-2 border-[#7B33F7] border-t-transparent rounded-full mx-auto mb-2 animate-spin"></div>
-                                    <p className="text-[#9D9D9D] text-sm">
-                                        Loading model...
-                                    </p>
+                                    <p className="text-[#9D9D9D] text-sm">Loading model...</p>
                                 </div>
                             ) : (
                                 <p className="text-base text-[#9D9D9D]">{currentModelDetails?.description}</p>
@@ -178,7 +166,6 @@ export default function App() {
     const modelBuffer = useRef(null);
     const mainContentRef = useRef(null);
 
-    // Get optimal performance settings
     const OPTIMAL_TILE_SIZE = useRef(getOptimalTileSize()).current;
     const TILE_OVERLAP = useRef(Math.max(8, Math.floor(OPTIMAL_TILE_SIZE / 8))).current;
 
@@ -186,13 +173,12 @@ export default function App() {
         mainContentRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
-    // Effect to set up optimized web worker pool
     useEffect(() => {
         const numWorkers = navigator.hardwareConcurrency || 4;
         const workerCode = `
             let session;
-            self.importScripts('[https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js](https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js)');
-            ort.env.wasm.wasmPaths = '[https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/](https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/)';
+            self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
+            ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
 
             self.onmessage = async (event) => {
                 const { type, payload, workerId } = event.data;
@@ -272,25 +258,22 @@ export default function App() {
                                 }
                                 upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
                                 
-                                // --- THIS IS THE CORRECTED STITCHING LOGIC ---
                                 const isFirstCol = x === 0;
                                 const isFirstRow = y === 0;
-                                // The check for the last items must be against the STEP, not TILE_SIZE
-                                const isLastCol = x + STEP >= stripBitmap.width - TILE_OVERLAP;
-                                const isLastRow = y + STEP >= stripBitmap.height - TILE_OVERLAP;
-
-                                const srcX = isFirstCol ? 0 : (TILE_OVERLAP / 2) * SCALE;
-                                const srcY = isFirstRow ? 0 : (TILE_OVERLAP / 2) * SCALE;
-
-                                const destX = x * SCALE + srcX;
-                                const destY = y * SCALE + srcY;
-
+                                const isLastCol = x + TILE_SIZE >= stripBitmap.width;
+                                const isLastRow = y + TILE_SIZE >= stripBitmap.height;
+                                
+                                const sx = isFirstCol ? 0 : (TILE_OVERLAP / 2) * SCALE;
+                                const sy = isFirstRow ? 0 : (TILE_OVERLAP / 2) * SCALE;
+                                
+                                const destX = x * SCALE + sx;
+                                const destY = y * SCALE + sy;
+                                
                                 const copyWidth = (TILE_SIZE - (isFirstCol ? 0 : TILE_OVERLAP / 2) - (isLastCol ? 0 : TILE_OVERLAP / 2)) * SCALE;
                                 const copyHeight = (TILE_SIZE - (isFirstRow ? 0 : TILE_OVERLAP / 2) - (isLastRow ? 0 : TILE_OVERLAP / 2)) * SCALE;
-                                
-                                // Ensure copy dimensions are not negative
+
                                 if (copyWidth > 0 && copyHeight > 0) {
-                                    outputCtx.drawImage(upscaledTileCanvas, srcX, srcY, copyWidth, copyHeight, destX, destY, copyWidth, copyHeight);
+                                    outputCtx.drawImage(upscaledTileCanvas, sx, sy, copyWidth, copyHeight, destX, dy, copyWidth, copyHeight);
                                 }
                                 
                                 self.postMessage({ type: 'tilingProgress', workerId: workerId });
@@ -339,11 +322,15 @@ export default function App() {
         };
     }, [OPTIMAL_TILE_SIZE, TILE_OVERLAP]);
 
+    // --- THIS IS THE FIXED useEffect HOOK ---
     useEffect(() => {
         const fontLink = document.createElement('link');
-        fontLink.href = "[https://fonts.googleapis.com/css2?family=General+Sans:ital,wght@0,400;0,700&family=Space+Grotesk:wght@400;500;700&display=swap](https://fonts.googleapis.com/css2?family=General+Sans:ital,wght@0,400;0,700&family=Space+Grotesk:wght@400;500;700&display=swap)";
+        fontLink.href = "https://fonts.googleapis.com/css2?family=General+Sans:ital,wght@0,400;0,700&family=Space+Grotesk:wght@400;500;700&display=swap";
         fontLink.rel = 'stylesheet';
-        document.head.appendChild(styleTag);
+        document.head.appendChild(fontLink); // Corrected this line
+        const styleTag = document.createElement('style');
+        styleTag.innerHTML = `body { font-family: 'Space Grotesk', sans-serif; }`;
+        document.head.appendChild(styleTag); // Added this missing line
         return () => {
             if (document.head.contains(fontLink)) document.head.removeChild(fontLink);
             if (document.head.contains(styleTag)) document.head.removeChild(styleTag);
@@ -447,12 +434,8 @@ export default function App() {
                     const actualStripHeight = actualEndY - actualStartY;
                     
                     if (actualStripHeight < OPTIMAL_TILE_SIZE) {
-                         if (workerId > 0) stripHeight += STRIP_OVERLAP;
-                         if (workerId < numWorkers - 1) stripHeight += STRIP_OVERLAP;
-                         if (stripHeight <= 0) {
-                            resolve();
-                            return;
-                         }
+                        resolve();
+                        return;
                     }
 
                     const stripCanvas = new OffscreenCanvas(paddedWidth, actualStripHeight);
@@ -536,7 +519,7 @@ export default function App() {
             <div className="w-full px-4 sm:px-8 md:px-16"><div className="h-px bg-[#374151]"></div></div>
             <HeroSection />
             <main ref={mainContentRef} className="w-full px-4 sm:px-8 md:px-16 pb-16">
-                <div className="flex flex-col xl:flex-row gap-8 xl:gap-12 items-start">
+                <div className="flex flex-col xl:flex-row gap-8 xl:give-12 items-start">
                     <div className="w-full xl:w-[60%] space-y-8">
                         <FileUpload onFilesAdded={handleFilesAdded} />
                         <FileList files={uploadedFiles} onRemoveFile={handleRemoveFile} />
