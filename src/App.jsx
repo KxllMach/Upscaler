@@ -246,28 +246,97 @@ export default function App() {
                                     }
                                 }
                                 upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
-                                
+                                // Replace the stitching section in your worker with this improved version:
+
                                 // Calculate seamless stitching coordinates
                                 const isFirstCol = x === 0;
                                 const isFirstRow = y === 0;
-                                const isLastCol = x + TILE_SIZE >= stripBitmap.width;
-                                const isLastRow = y + TILE_SIZE >= stripBitmap.height;
+                                const isLastCol = x + STEP >= stripBitmap.width;
+                                const isLastRow = y + STEP >= stripBitmap.height;
                                 
-                                // Source coordinates (skip overlap areas)
-                                const srcX = isFirstCol ? 0 : (TILE_OVERLAP / 2) * SCALE;
-                                const srcY = isFirstRow ? 0 : (TILE_OVERLAP / 2) * SCALE;
+                                // For seamless stitching, we need to:
+                                // 1. Skip overlap pixels from previous tiles
+                                // 2. Only take the "new" pixels from current tile
+                                // 3. Handle edge cases properly
                                 
-                                // Destination coordinates
-                                const destX = isFirstCol ? 0 : (x + TILE_OVERLAP / 2) * SCALE;
-                                const destY = isFirstRow ? 0 : (y + TILE_OVERLAP / 2) * SCALE;
+                                let srcX, srcY, destX, destY, copyWidth, copyHeight;
                                 
-                                // Dimensions (exclude overlap areas)
-                                const tileWidth = (isFirstCol ? TILE_SIZE - TILE_OVERLAP / 2 : 
-                                                   isLastCol ? TILE_SIZE - TILE_OVERLAP / 2 : STEP) * SCALE;
-                                const tileHeight = (isFirstRow ? TILE_SIZE - TILE_OVERLAP / 2 : 
-                                                    isLastRow ? TILE_SIZE - TILE_OVERLAP / 2 : STEP) * SCALE;
+                                if (isFirstCol && isFirstRow) {
+                                    // Top-left corner: take full tile minus bottom-right overlap
+                                    srcX = 0;
+                                    srcY = 0;
+                                    destX = x * SCALE;
+                                    destY = y * SCALE;
+                                    copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                    copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                } else if (isFirstCol && isLastRow) {
+                                    // Bottom-left corner: skip top overlap, take rest
+                                    srcX = 0;
+                                    srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = x * SCALE;
+                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                    copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                } else if (isLastCol && isFirstRow) {
+                                    // Top-right corner: skip left overlap, take rest
+                                    srcX = (TILE_OVERLAP / 2) * SCALE;
+                                    srcY = 0;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
+                                    destY = y * SCALE;
+                                    copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                    copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                } else if (isLastCol && isLastRow) {
+                                    // Bottom-right corner: skip both overlaps
+                                    srcX = (TILE_OVERLAP / 2) * SCALE;
+                                    srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
+                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                    copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                } else if (isFirstCol) {
+                                    // Left edge: skip top overlap only
+                                    srcX = 0;
+                                    srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = x * SCALE;
+                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                    copyHeight = STEP * SCALE;
+                                } else if (isLastCol) {
+                                    // Right edge: skip left and top overlaps
+                                    srcX = (TILE_OVERLAP / 2) * SCALE;
+                                    srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
+                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                    copyHeight = STEP * SCALE;
+                                } else if (isFirstRow) {
+                                    // Top edge: skip left overlap only
+                                    srcX = (TILE_OVERLAP / 2) * SCALE;
+                                    srcY = 0;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
+                                    destY = y * SCALE;
+                                    copyWidth = STEP * SCALE;
+                                    copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                } else if (isLastRow) {
+                                    // Bottom edge: skip left and top overlaps
+                                    srcX = (TILE_OVERLAP / 2) * SCALE;
+                                    srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
+                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    copyWidth = STEP * SCALE;
+                                    copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
+                                } else {
+                                    // Interior tile: skip all overlaps
+                                    srcX = (TILE_OVERLAP / 2) * SCALE;
+                                    srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
+                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    copyWidth = STEP * SCALE;
+                                    copyHeight = STEP * SCALE;
+                                }
                                 
-                                outputCtx.drawImage(upscaledTileCanvas, srcX, srcY, tileWidth, tileHeight, destX, destY, tileWidth, tileHeight);
+                                // Apply the corrected stitching
+                                outputCtx.drawImage(upscaledTileCanvas, srcX, srcY, copyWidth, copyHeight, destX, destY, copyWidth, copyHeight);
 
                                 // --- THIS IS THE FIX ---
                                 // The workerId must be included in the progress report
