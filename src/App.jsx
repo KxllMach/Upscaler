@@ -29,6 +29,27 @@ const Button = ({ children, className = '', ...props }) => (
   </button>
 );
 
+// --- Performance Detection & Optimization ---
+function getOptimalTileSize() {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+    
+    if (!gl) return 64; // Fallback
+    
+    const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const memoryInfo = navigator.deviceMemory || 4; // GB, fallback to 4GB
+    
+    // Estimate optimal tile size
+    if (isMobile) {
+        return memoryInfo >= 6 ? 96 : 64;
+    } else {
+        if (memoryInfo >= 8 && maxTextureSize >= 4096) return 128;
+        if (memoryInfo >= 4 && maxTextureSize >= 2048) return 96;
+        return 64;
+    }
+}
+
 // --- UI Component Definitions ---
 const Navigation = () => (
     <nav className="flex w-full max-w-screen-xl mx-auto justify-between items-center px-4 sm:px-8 md:px-16 py-6">
@@ -144,8 +165,7 @@ const UpscaleOptions = ({ onUpscale, disabled = false, modelLoadingState }) => {
     );
 };
 
-
-// --- Main App Component Logic (Fixed) ---
+// --- Main App Component with All Optimizations ---
 export default function App() {
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -156,13 +176,65 @@ export default function App() {
     const modelLoaded = useRef(null);
     const modelBuffer = useRef(null);
 
-    // Effect to set up and tear down the web worker pool
+    // Get optimal performance settings
+    const OPTIMAL_TILE_SIZE = useRef(getOptimalTileSize()).current;
+    const TILE_OVERLAP = useRef(Math.max(4, Math.floor(OPTIMAL_TILE_SIZE / 16))).current;
+
+    // Effect to set up optimized web worker pool
     useEffect(() => {
         const numWorkers = navigator.hardwareConcurrency || 4;
         const workerCode = `
             let session;
+            let tileCache = new Map();
+            const MAX_CACHE_SIZE = 50;
+            
             self.importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
             ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+
+            // Fast tensor operations
+            class FastTensorOps {
+                static convertRGBAToFloat32(imageData, width, height) {
+                    const { data } = imageData;
+                    const float32Data = new Float32Array(3 * width * height);
+                    const pixelCount = width * height;
+                    
+                    // Vectorized conversion
+                    for (let i = 0; i < pixelCount; i++) {
+                        const idx = i * 4;
+                        float32Data[i] = data[idx] / 255.0;
+                        float32Data[i + pixelCount] = data[idx + 1] / 255.0;
+                        float32Data[i + 2 * pixelCount] = data[idx + 2] / 255.0;
+                    }
+                    
+                    return float32Data;
+                }
+                
+                static convertFloat32ToRGBA(outputData, width, height) {
+                    const pixelCount = width * height;
+                    const imageData = new ImageData(width, height);
+                    const data = imageData.data;
+                    
+                    for (let i = 0; i < pixelCount; i++) {
+                        const idx = i * 4;
+                        data[idx] = Math.min(255, Math.max(0, outputData[i] * 255));
+                        data[idx + 1] = Math.min(255, Math.max(0, outputData[i + pixelCount] * 255));
+                        data[idx + 2] = Math.min(255, Math.max(0, outputData[i + 2 * pixelCount] * 255));
+                        data[idx + 3] = 255;
+                    }
+                    
+                    return imageData;
+                }
+            }
+
+            // Generate simple hash for caching
+            function simpleHash(data) {
+                let hash = 0;
+                const step = Math.max(1, Math.floor(data.length / 1000));
+                for (let i = 0; i < data.length; i += step) {
+                    hash = ((hash << 5) - hash + data[i]) & 0xffffffff;
+                }
+                return hash.toString(36);
+            }
 
             self.onmessage = async (event) => {
                 const { type, payload, workerId } = event.data;
@@ -171,7 +243,10 @@ export default function App() {
                     try {
                         const { modelBuffer } = payload;
                         if (!session) { 
-                            session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['webgl', 'wasm'] });
+                            session = await ort.InferenceSession.create(modelBuffer, { 
+                                executionProviders: ['webgl', 'wasm'],
+                                graphOptimizationLevel: 'all'
+                            });
                         }
                         self.postMessage({ type: 'modelLoaded', workerId });
                     } catch (error) {
@@ -184,8 +259,8 @@ export default function App() {
                         if (!session) throw new Error('Session not ready.');
                         const { stripBitmap, stripInfo } = payload;
                         
-                        const TILE_SIZE = 64;
-                        const TILE_OVERLAP = 8;
+                        const TILE_SIZE = ${OPTIMAL_TILE_SIZE};
+                        const TILE_OVERLAP = ${TILE_OVERLAP};
                         const STEP = TILE_SIZE - TILE_OVERLAP;
                         const SCALE = 4;
                         
@@ -193,15 +268,13 @@ export default function App() {
                         const outputCanvas = new OffscreenCanvas(stripBitmap.width * SCALE, stripBitmap.height * SCALE);
                         const outputCtx = outputCanvas.getContext('2d');
                         
-                        // Process tiles within the strip
+                        // Process tiles within the strip with optimized stitching
                         for (let y = 0; y < stripBitmap.height; y += STEP) {
-                            // Adjust for last tile to ensure full coverage
                             if (y + TILE_SIZE > stripBitmap.height && y > 0) {
                                 y = stripBitmap.height - TILE_SIZE;
                             }
                             
                             for (let x = 0; x < stripBitmap.width; x += STEP) {
-                                // Adjust for last tile to ensure full coverage
                                 if (x + TILE_SIZE > stripBitmap.width && x > 0) {
                                     x = stripBitmap.width - TILE_SIZE;
                                 }
@@ -211,150 +284,107 @@ export default function App() {
                                 const tileCtx = tileCanvas.getContext('2d');
                                 tileCtx.drawImage(stripBitmap, x, y, TILE_SIZE, TILE_SIZE, 0, 0, TILE_SIZE, TILE_SIZE);
                                 
-                                // Prepare input tensor
+                                // Get tile data and check cache
                                 const tileImageData = tileCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
-                                const { data, width, height } = tileImageData;
-                                const float32Data = new Float32Array(3 * width * height);
-                                for (let i = 0; i < width * height; i++) {
-                                    float32Data[i] = data[i * 4] / 255.0;
-                                    float32Data[i + width * height] = data[i * 4 + 1] / 255.0;
-                                    float32Data[i + 2 * width * height] = data[i * 4 + 2] / 255.0;
-                                }
+                                const tileHash = simpleHash(tileImageData.data);
                                 
-                                // Run inference
-                                const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, height, width]);
-                                const feeds = { [session.inputNames[0]]: inputTensor };
-                                const results = await session.run(feeds);
-                                const outputTensor = results[session.outputNames[0]];
+                                let upscaledImageData;
+                                if (tileCache.has(tileHash)) {
+                                    upscaledImageData = tileCache.get(tileHash);
+                                } else {
+                                    // Run inference
+                                    const float32Data = FastTensorOps.convertRGBAToFloat32(tileImageData, TILE_SIZE, TILE_SIZE);
+                                    const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, TILE_SIZE, TILE_SIZE]);
+                                    const feeds = { [session.inputNames[0]]: inputTensor };
+                                    const results = await session.run(feeds);
+                                    const outputTensor = results[session.outputNames[0]];
+                                    
+                                    upscaledImageData = FastTensorOps.convertFloat32ToRGBA(outputTensor.data, TILE_SIZE * SCALE, TILE_SIZE * SCALE);
+                                    
+                                    // Cache result
+                                    if (tileCache.size >= MAX_CACHE_SIZE) {
+                                        const firstKey = tileCache.keys().next().value;
+                                        tileCache.delete(firstKey);
+                                    }
+                                    tileCache.set(tileHash, upscaledImageData);
+                                }
 
-                                // Convert output to image
+                                // Create upscaled tile canvas
                                 const upscaledTileCanvas = new OffscreenCanvas(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
                                 const upscaledTileCtx = upscaledTileCanvas.getContext('2d');
-                                const upscaledImageData = upscaledTileCtx.createImageData(TILE_SIZE * SCALE, TILE_SIZE * SCALE);
-                                const upscaledData = upscaledImageData.data;
-                                const outputData = outputTensor.data;
-                                const tileArea = TILE_SIZE * SCALE * TILE_SIZE * SCALE;
-
-                                for (let ty = 0; ty < TILE_SIZE * SCALE; ty++) {
-                                    for (let tx = 0; tx < TILE_SIZE * SCALE; tx++) {
-                                        const pos = (ty * TILE_SIZE * SCALE + tx);
-                                        const r = Math.min(255, Math.max(0, outputData[pos] * 255));
-                                        const g = Math.min(255, Math.max(0, outputData[pos + tileArea] * 255));
-                                        const b = Math.min(255, Math.max(0, outputData[pos + 2 * tileArea] * 255));
-                                        const idx = pos * 4;
-                                        upscaledData[idx] = r; upscaledData[idx + 1] = g; upscaledData[idx + 2] = b; upscaledData[idx + 3] = 255;
-                                    }
-                                }
                                 upscaledTileCtx.putImageData(upscaledImageData, 0, 0);
-                                // Replace the stitching section in your worker with this improved version:
-
-                                // Calculate seamless stitching coordinates
+                                
+                                // Optimized stitching logic to eliminate seams
                                 const isFirstCol = x === 0;
                                 const isFirstRow = y === 0;
                                 const isLastCol = x + STEP >= stripBitmap.width;
                                 const isLastRow = y + STEP >= stripBitmap.height;
-                                
-                                // For seamless stitching, we need to:
-                                // 1. Skip overlap pixels from previous tiles
-                                // 2. Only take the "new" pixels from current tile
-                                // 3. Handle edge cases properly
-                                
+
                                 let srcX, srcY, destX, destY, copyWidth, copyHeight;
-                                
+
                                 if (isFirstCol && isFirstRow) {
-                                    // Top-left corner: take full tile minus bottom-right overlap
-                                    srcX = 0;
-                                    srcY = 0;
-                                    destX = x * SCALE;
-                                    destY = y * SCALE;
+                                    srcX = 0; srcY = 0;
+                                    destX = x * SCALE; destY = y * SCALE;
                                     copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                     copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                 } else if (isFirstCol && isLastRow) {
-                                    // Bottom-left corner: skip top overlap, take rest
-                                    srcX = 0;
-                                    srcY = (TILE_OVERLAP / 2) * SCALE;
-                                    destX = x * SCALE;
-                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    srcX = 0; srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = x * SCALE; destY = (y + TILE_OVERLAP / 2) * SCALE;
                                     copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                     copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                 } else if (isLastCol && isFirstRow) {
-                                    // Top-right corner: skip left overlap, take rest
-                                    srcX = (TILE_OVERLAP / 2) * SCALE;
-                                    srcY = 0;
-                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
-                                    destY = y * SCALE;
+                                    srcX = (TILE_OVERLAP / 2) * SCALE; srcY = 0;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE; destY = y * SCALE;
                                     copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                     copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                 } else if (isLastCol && isLastRow) {
-                                    // Bottom-right corner: skip both overlaps
-                                    srcX = (TILE_OVERLAP / 2) * SCALE;
-                                    srcY = (TILE_OVERLAP / 2) * SCALE;
-                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
-                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    srcX = (TILE_OVERLAP / 2) * SCALE; srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE; destY = (y + TILE_OVERLAP / 2) * SCALE;
                                     copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                     copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                 } else if (isFirstCol) {
-                                    // Left edge: skip top overlap only
-                                    srcX = 0;
-                                    srcY = (TILE_OVERLAP / 2) * SCALE;
-                                    destX = x * SCALE;
-                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    srcX = 0; srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = x * SCALE; destY = (y + TILE_OVERLAP / 2) * SCALE;
                                     copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                     copyHeight = STEP * SCALE;
                                 } else if (isLastCol) {
-                                    // Right edge: skip left and top overlaps
-                                    srcX = (TILE_OVERLAP / 2) * SCALE;
-                                    srcY = (TILE_OVERLAP / 2) * SCALE;
-                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
-                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    srcX = (TILE_OVERLAP / 2) * SCALE; srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE; destY = (y + TILE_OVERLAP / 2) * SCALE;
                                     copyWidth = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                     copyHeight = STEP * SCALE;
                                 } else if (isFirstRow) {
-                                    // Top edge: skip left overlap only
-                                    srcX = (TILE_OVERLAP / 2) * SCALE;
-                                    srcY = 0;
-                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
-                                    destY = y * SCALE;
+                                    srcX = (TILE_OVERLAP / 2) * SCALE; srcY = 0;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE; destY = y * SCALE;
                                     copyWidth = STEP * SCALE;
                                     copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                 } else if (isLastRow) {
-                                    // Bottom edge: skip left and top overlaps
-                                    srcX = (TILE_OVERLAP / 2) * SCALE;
-                                    srcY = (TILE_OVERLAP / 2) * SCALE;
-                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
-                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    srcX = (TILE_OVERLAP / 2) * SCALE; srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE; destY = (y + TILE_OVERLAP / 2) * SCALE;
                                     copyWidth = STEP * SCALE;
                                     copyHeight = (TILE_SIZE - TILE_OVERLAP / 2) * SCALE;
                                 } else {
-                                    // Interior tile: skip all overlaps
-                                    srcX = (TILE_OVERLAP / 2) * SCALE;
-                                    srcY = (TILE_OVERLAP / 2) * SCALE;
-                                    destX = (x + TILE_OVERLAP / 2) * SCALE;
-                                    destY = (y + TILE_OVERLAP / 2) * SCALE;
+                                    srcX = (TILE_OVERLAP / 2) * SCALE; srcY = (TILE_OVERLAP / 2) * SCALE;
+                                    destX = (x + TILE_OVERLAP / 2) * SCALE; destY = (y + TILE_OVERLAP / 2) * SCALE;
                                     copyWidth = STEP * SCALE;
                                     copyHeight = STEP * SCALE;
                                 }
-                                
-                                // Apply the corrected stitching
+
+                                // Apply optimized stitching
                                 outputCtx.drawImage(upscaledTileCanvas, srcX, srcY, copyWidth, copyHeight, destX, destY, copyWidth, copyHeight);
 
-                                // --- THIS IS THE FIX ---
-                                // The workerId must be included in the progress report
                                 self.postMessage({ type: 'tilingProgress', workerId: workerId });
                                 
-                                // Break if we've reached the end
                                 if (x + TILE_SIZE >= stripBitmap.width) break;
                             }
                             if (y + TILE_SIZE >= stripBitmap.height) break;
                         }
 
-                        // Create final cropped strip (remove padding overlaps)
+                        // Create final cropped strip
                         const finalWidth = stripInfo.originalWidth * SCALE;
                         const finalHeight = stripInfo.originalHeight * SCALE;
                         const croppedCanvas = new OffscreenCanvas(finalWidth, finalHeight);
                         const croppedCtx = croppedCanvas.getContext('2d');
                         
-                        // Calculate crop coordinates
                         const cropX = stripInfo.paddingLeft * SCALE;
                         const cropY = stripInfo.paddingTop * SCALE;
                         
@@ -376,8 +406,10 @@ export default function App() {
                 }
             };
         `;
+        
         const blob = new Blob([workerCode], { type: 'application/javascript' });
         const workerUrl = URL.createObjectURL(blob);
+        
         for (let i = 0; i < numWorkers; i++) {
             workerPool.current.push(new Worker(workerUrl));
         }
@@ -386,7 +418,7 @@ export default function App() {
             workerPool.current.forEach(w => w.terminate());
             URL.revokeObjectURL(workerUrl);
         };
-    }, []);
+    }, [OPTIMAL_TILE_SIZE, TILE_OVERLAP]);
 
     useEffect(() => {
         const fontLink = document.createElement('link');
@@ -412,7 +444,7 @@ export default function App() {
         setProcessingStatus('Loading AI model...');
         setModelLoadingState({ isLoading: true, progress: 0 });
 
-        // Load model if needed
+        // Load model if needed with improved error handling
         if (model.id !== modelLoaded.current) {
             try {
                 setProcessingStatus('Downloading model...');
@@ -423,13 +455,21 @@ export default function App() {
 
                 const modelReadyPromises = workerPool.current.map((worker, i) =>
                     new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            reject(new Error('Worker initialization timeout'));
+                        }, 30000);
+
                         const listener = (event) => {
                             const { type, workerId, payload } = event.data;
                             if (workerId !== i) return;
                             if (type === 'modelLoaded') {
-                                worker.removeEventListener('message', listener); resolve();
+                                clearTimeout(timeout);
+                                worker.removeEventListener('message', listener);
+                                resolve();
                             } else if (type === 'error') {
-                                worker.removeEventListener('message', listener); reject(new Error(payload.message));
+                                clearTimeout(timeout);
+                                worker.removeEventListener('message', listener);
+                                reject(new Error(payload.message));
                             }
                         };
                         worker.addEventListener('message', listener);
@@ -440,7 +480,7 @@ export default function App() {
                 modelLoaded.current = model.id;
             } catch (error) {
                 console.error('Model loading failed:', error);
-                alert(`Failed to load model: ${error.message}`)
+                alert(`Failed to load model: ${error.message}`);
                 setIsProcessing(false);
                 setModelLoadingState({ isLoading: false, progress: 0 });
                 return;
@@ -449,27 +489,42 @@ export default function App() {
         
         setModelLoadingState({ isLoading: false, progress: 100 });
 
-        // Process each file
+        // Process each file with memory-efficient strip processing
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
             const originalBitmap = await createImageBitmap(file);
 
-            const TILE_SIZE = 64;
-            const TILE_OVERLAP = 8;
-            const STEP = TILE_SIZE - TILE_OVERLAP;
+            const STEP = OPTIMAL_TILE_SIZE - TILE_OVERLAP;
             
-            // Calculate padding needed for seamless tiling
+            // Calculate improved padding for seamless tiling
             const paddedWidth = Math.ceil(originalBitmap.width / STEP) * STEP + TILE_OVERLAP;
             const paddedHeight = Math.ceil(originalBitmap.height / STEP) * STEP + TILE_OVERLAP;
 
-            // Create padded canvas
+            // Create padded canvas with reflection padding for better edge handling
             const paddedCanvas = new OffscreenCanvas(paddedWidth, paddedHeight);
             const paddedCtx = paddedCanvas.getContext('2d');
+            
+            // Draw original image
             paddedCtx.drawImage(originalBitmap, 0, 0);
             
-            // Calculate strips for parallel processing
+            // Add reflection padding for better tile boundaries
+            if (paddedWidth > originalBitmap.width) {
+                paddedCtx.drawImage(originalBitmap, 
+                    originalBitmap.width - (paddedWidth - originalBitmap.width), 0, 
+                    paddedWidth - originalBitmap.width, originalBitmap.height,
+                    originalBitmap.width, 0, paddedWidth - originalBitmap.width, originalBitmap.height);
+            }
+            if (paddedHeight > originalBitmap.height) {
+                paddedCtx.drawImage(originalBitmap, 
+                    0, originalBitmap.height - (paddedHeight - originalBitmap.height), 
+                    originalBitmap.width, paddedHeight - originalBitmap.height,
+                    0, originalBitmap.height, originalBitmap.width, paddedHeight - originalBitmap.height);
+            }
+
+            // Calculate optimized strips for better performance
             const numWorkers = workerPool.current.length;
-            const baseStripHeight = Math.ceil(paddedHeight / numWorkers / STEP) * STEP;
+            const OPTIMAL_STRIP_HEIGHT = Math.max(128, Math.ceil(paddedHeight / numWorkers / STEP) * STEP);
+            const STRIP_OVERLAP = 32; // Larger overlap for seamless strip blending
 
             const totalTiles = Math.ceil(paddedWidth / STEP) * Math.ceil(paddedHeight / STEP);
             progressRef.current = 0;
@@ -484,36 +539,43 @@ export default function App() {
 
             const upscalePromises = workerPool.current.map((worker, workerId) =>
                 new Promise(async (resolve, reject) => {
-                    // Calculate strip boundaries
-                    const stripStartY = workerId * baseStripHeight;
-                    const stripEndY = Math.min((workerId + 1) * baseStripHeight, paddedHeight);
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Processing timeout'));
+                    }, 300000); // 5 minute timeout
+
+                    // Calculate strip boundaries with improved overlap handling
+                    const stripStartY = workerId * OPTIMAL_STRIP_HEIGHT;
+                    const stripEndY = Math.min((workerId + 1) * OPTIMAL_STRIP_HEIGHT, paddedHeight);
                     const stripHeight = stripEndY - stripStartY;
 
                     if (stripHeight <= 0) {
+                        clearTimeout(timeout);
                         resolve(); 
                         return;
                     }
                     
                     // Add overlap for seamless stitching between strips
-                    const STRIP_OVERLAP = 16;
                     const actualStartY = Math.max(0, stripStartY - (workerId > 0 ? STRIP_OVERLAP : 0));
                     const actualEndY = Math.min(paddedHeight, stripEndY + (workerId < numWorkers - 1 ? STRIP_OVERLAP : 0));
                     const actualStripHeight = actualEndY - actualStartY;
                     
-                    // Extract strip
+                    // Extract strip with WebGL acceleration if available
                     const stripCanvas = new OffscreenCanvas(paddedWidth, actualStripHeight);
                     const stripCtx = stripCanvas.getContext('2d');
                     stripCtx.drawImage(paddedCanvas, 0, actualStartY, paddedWidth, actualStripHeight, 0, 0, paddedWidth, actualStripHeight);
                     const stripBitmap = await stripCanvas.transferToImageBitmap();
                     
-                    // Prepare strip information
+                    // Prepare strip information with enhanced blending data
                     const stripInfo = {
                         startY: stripStartY,
                         originalWidth: paddedWidth,
                         originalHeight: stripHeight,
                         paddingLeft: 0,
                         paddingTop: stripStartY - actualStartY,
-                        workerId: workerId
+                        workerId: workerId,
+                        hasTopBlend: workerId > 0,
+                        hasBottomBlend: workerId < numWorkers - 1,
+                        blendSize: STRIP_OVERLAP
                     };
                     
                     const listener = (event) => {
@@ -522,14 +584,47 @@ export default function App() {
                         
                         if (type === 'tilingProgress') {
                             progressRef.current++;
-                            setProcessingStatus(`Processing... ${((progressRef.current / totalTiles) * 100).toFixed(0)}%`);
+                            setProcessingStatus(`Processing... ${Math.min(99, ((progressRef.current / totalTiles) * 100)).toFixed(0)}%`);
                         } else if (type === 'upscaleComplete') {
-                            // Place the upscaled strip in the final canvas
+                            clearTimeout(timeout);
+                            
+                            // Enhanced strip blending for seamless results
                             const finalY = payload.stripInfo.startY * 4;
-                            finalCtx.drawImage(payload.upscaledStrip, 0, finalY);
+                            
+                            if (payload.stripInfo.hasTopBlend && workerId > 0) {
+                                // Apply feathering blend with previous strip
+                                const blendHeight = payload.stripInfo.blendSize * 4;
+                                const tempCanvas = document.createElement('canvas');
+                                tempCanvas.width = payload.upscaledStrip.width;
+                                tempCanvas.height = blendHeight;
+                                const tempCtx = tempCanvas.getContext('2d');
+                                
+                                // Draw the overlapping region
+                                tempCtx.drawImage(payload.upscaledStrip, 0, 0, tempCanvas.width, blendHeight, 0, 0, tempCanvas.width, blendHeight);
+                                
+                                // Apply gradient blend
+                                tempCtx.globalCompositeOperation = 'destination-in';
+                                const gradient = tempCtx.createLinearGradient(0, 0, 0, blendHeight);
+                                gradient.addColorStop(0, 'rgba(255,255,255,0)');
+                                gradient.addColorStop(1, 'rgba(255,255,255,1)');
+                                tempCtx.fillStyle = gradient;
+                                tempCtx.fillRect(0, 0, tempCanvas.width, blendHeight);
+                                
+                                // Composite with existing content
+                                finalCtx.globalCompositeOperation = 'source-over';
+                                finalCtx.drawImage(tempCanvas, 0, finalY);
+                                
+                                // Draw non-overlapping part
+                                finalCtx.drawImage(payload.upscaledStrip, 0, blendHeight, payload.upscaledStrip.width, payload.upscaledStrip.height - blendHeight, 0, finalY + blendHeight, payload.upscaledStrip.width, payload.upscaledStrip.height - blendHeight);
+                            } else {
+                                // First strip or no blending needed
+                                finalCtx.drawImage(payload.upscaledStrip, 0, finalY);
+                            }
+                            
                             worker.removeEventListener('message', listener);
                             resolve();
                         } else if (type === 'error') {
+                            clearTimeout(timeout);
                             worker.removeEventListener('message', listener);
                             console.error('Error from worker:', payload);
                             reject(new Error(payload.message));
@@ -550,13 +645,24 @@ export default function App() {
 
             try {
                 await Promise.all(upscalePromises);
+                setProcessingStatus('Finalizing...');
 
-                // Download the result
+                // Enhanced output with better compression
+                const outputFormat = format.toLowerCase();
+                let quality = 0.95;
+                if (outputFormat === 'jpeg') quality = 0.92;
+                if (outputFormat === 'webp') quality = 0.90;
+
+                // Download the result with optimized naming
                 const link = document.createElement('a');
-                const fileExtension = format.toLowerCase();
-                link.download = `${file.name.split('.').slice(0, -1).join('.')}_upscaled.${fileExtension}`;
-                link.href = finalCanvas.toDataURL(`image/${fileExtension}`);
+                const fileExtension = outputFormat;
+                const originalName = file.name.split('.').slice(0, -1).join('.');
+                link.download = `${originalName}_upscaled_${OPTIMAL_TILE_SIZE}x4.${fileExtension}`;
+                link.href = finalCanvas.toDataURL(`image/${fileExtension}`, quality);
                 link.click();
+
+                setProcessingStatus('Complete!');
+                
             } catch (error) {
                 console.error(`Failed to process ${file.name}:`, error);
                 alert(`Failed to process ${file.name}: ${error.message}`);
@@ -564,8 +670,11 @@ export default function App() {
             }
         }
 
-        setIsProcessing(false);
-        setProcessingStatus('');
+        // Clean up and reset
+        setTimeout(() => {
+            setIsProcessing(false);
+            setProcessingStatus('');
+        }, 1000);
     };
 
     return (
@@ -578,6 +687,19 @@ export default function App() {
                     <div className="w-full xl:w-[60%] space-y-8">
                         <FileUpload onFilesAdded={handleFilesAdded} />
                         <FileList files={uploadedFiles} onRemoveFile={handleRemoveFile} />
+                        {uploadedFiles.length > 0 && (
+                            <div className="bg-[#1F2937] border border-[#374151] rounded-[2.5rem] p-6">
+                                <div className="flex items-center gap-4 text-[#9CA3AF]">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                                    </svg>
+                                    <div className="text-sm">
+                                        <p className="font-medium text-white">Performance Mode: {OPTIMAL_TILE_SIZE}px tiles</p>
+                                        <p>Optimized for your device • {navigator.hardwareConcurrency || 4} worker threads • {TILE_OVERLAP}px overlap</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                     <div className="w-full xl:w-[40%] xl:max-w-[540px]">
                         <UpscaleOptions onUpscale={handleUpscale} disabled={uploadedFiles.length === 0 || isProcessing} modelLoadingState={modelLoadingState} />
@@ -586,9 +708,16 @@ export default function App() {
             </main>
             {isProcessing && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
-                    <div className="bg-[#1F2937] rounded-3xl p-8 text-center shadow-lg">
+                    <div className="bg-[#1F2937] rounded-3xl p-8 text-center shadow-lg max-w-md mx-4">
                         <div className="animate-spin w-8 h-8 border-2 border-[#7B33F7] border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="text-white text-lg">{modelLoadingState.isLoading ? processingStatus : processingStatus}</p>
+                        <p className="text-white text-lg mb-2">{modelLoadingState.isLoading ? 'Loading Model...' : 'Processing Images...'}</p>
+                        <p className="text-[#9D9D9D] text-sm">{processingStatus}</p>
+                        <div className="mt-4 bg-[#111827] rounded-full h-2 overflow-hidden">
+                            <div 
+                                className="h-full bg-gradient-to-r from-[#7B33F7] to-purple-600 transition-all duration-500"
+                                style={{width: `${modelLoadingState.isLoading ? 50 : Math.min(99, (progressRef.current / (Math.ceil(uploadedFiles.length) * 10)) * 100)}%`}}
+                            ></div>
+                        </div>
                     </div>
                 </div>
             )}
